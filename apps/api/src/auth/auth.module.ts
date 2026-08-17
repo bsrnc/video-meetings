@@ -6,6 +6,7 @@ import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthTokenService } from './auth-token.service';
 import { RegisterHandler } from './commands/handlers/register.handler';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LoginHandler } from './queries/handlers/login.handler';
 
 const CommandHandlers = [RegisterHandler];
@@ -24,6 +25,12 @@ const QueryHandlers = [LoginHandler];
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthTokenService, ...CommandHandlers, ...QueryHandlers],
+  providers: [
+    AuthTokenService,
+    JwtAuthGuard,
+    ...CommandHandlers,
+    ...QueryHandlers,
+  ],
+  exports: [AuthTokenService, JwtAuthGuard],
 })
 export class AuthModule {}
