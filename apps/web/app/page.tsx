@@ -1,75 +1,211 @@
 'use client';
 
-import Image from 'next/image';
-import { Button } from '@heroui/react';
-import styles from './page.module.css';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  Alert,
+  Button,
+  Card,
+  Spinner,
+  useIsHydrated,
+  useOverlayState,
+} from '@heroui/react';
+import { CreateMeetingDialog } from '@/components/create-meeting-dialog';
+import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
+import {
+  clearStoredToken,
+  decodeAccessToken,
+  getStoredToken,
+  isAccessTokenExpired,
+} from '@/lib/auth';
+import { sortByNewest, type Meeting } from '@/lib/meetings';
 
-export default function Home() {
+const RECENT_MEETINGS_COUNT = 3;
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+export default function HomePage() {
+  const router = useRouter();
+  const createDialog = useOverlayState();
+  const [meetings, setMeetings] = useState<Meeting[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // The token lives in localStorage, so it can only be read on the client. The
+  // first render — server render and hydration alike — must not touch it, or
+  // the markup would not match.
+  const isHydrated = useIsHydrated();
+  const token = isHydrated ? getStoredToken() : null;
+
+  // An expired token counts as no token at all: the API would 401 on it anyway.
+  const email = useMemo(() => {
+    const payload = token ? decodeAccessToken(token) : null;
+    return payload && !isAccessTokenExpired(payload) ? payload.email : null;
+  }, [token]);
+
+  const signOut = useCallback(() => {
+    clearStoredToken();
+    router.replace('/auth/login');
+  }, [router]);
+
+  useEffect(() => {
+    if (isHydrated && !email) {
+      clearStoredToken();
+      router.replace('/auth/login');
+    }
+  }, [email, isHydrated, router]);
+
+  useEffect(() => {
+    if (!token || !email) {
+      return;
+    }
+
+    let isStale = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${API_URL}/meetings`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (response.status === 401) {
+          signOut();
+          return;
+        }
+        if (!response.ok) {
+          if (!isStale) {
+            setLoadError(await parseErrorMessage(response));
+          }
+          return;
+        }
+
+        const data = (await response.json()) as Meeting[];
+        if (!isStale) {
+          setMeetings(sortByNewest(data));
+        }
+      } catch {
+        if (!isStale) {
+          setLoadError(NETWORK_ERROR_MESSAGE);
+        }
+      }
+    })();
+
+    return () => {
+      isStale = true;
+    };
+  }, [email, signOut, token]);
+
+  // Nothing is rendered until the gate has run, so a signed-out visitor never
+  // sees the page contents flash before the redirect.
+  if (!token || !email) {
+    return (
+      <main className="flex min-h-screen items-center justify-center p-6">
+        <Spinner aria-label="Checking your session" size="lg" />
+      </main>
+    );
+  }
+
+  const recentMeetings = meetings?.slice(0, RECENT_MEETINGS_COUNT) ?? [];
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>
-            To get started, edit the{' '}
-            <code className={styles.code}>page.tsx</code> file.
+    <>
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-separator px-4 py-3 sm:px-6">
+        <span className="text-base font-semibold text-foreground">
+          Video Meetings
+        </span>
+        <Button className="h-11" onPress={signOut} variant="tertiary">
+          Sign out
+        </Button>
+      </header>
+
+      <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl leading-8 font-semibold text-foreground">
+            Welcome back
           </h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{' '}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{' '}
-            or the{' '}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{' '}
-            center.
+          <p className="text-sm text-muted">
+            Signed in as <span className="text-foreground">{email}</span>
           </p>
         </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-        <Button onPress={() => console.log('HeroUI Button pressed')}>
-          HeroUI Ready
-        </Button>
+
+        {loadError ? (
+          <Alert status="danger">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>{loadError}</Alert.Title>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+
+        <Card className="gap-4 p-6">
+          <Card.Header className="gap-1">
+            <h2 className="text-sm font-medium text-muted">Meetings</h2>
+            <p
+              aria-busy={meetings === null && loadError === null}
+              className="text-3xl leading-9 font-semibold text-foreground"
+            >
+              {meetings === null ? '—' : meetings.length}
+            </p>
+          </Card.Header>
+          <Card.Footer>
+            <Button className="h-12" onPress={createDialog.open} size="lg">
+              Create meeting
+            </Button>
+          </Card.Footer>
+        </Card>
+
+        <Card className="gap-4 p-6">
+          <Card.Header className="gap-1">
+            <h2 className="text-base font-semibold text-foreground">
+              Recent meetings
+            </h2>
+            <Card.Description>
+              The {RECENT_MEETINGS_COUNT} most recently created meetings.
+            </Card.Description>
+          </Card.Header>
+
+          <Card.Content>
+            {meetings === null && loadError === null ? (
+              <div className="flex justify-center py-4">
+                <Spinner aria-label="Loading meetings" />
+              </div>
+            ) : recentMeetings.length === 0 ? (
+              <p className="py-2 text-sm text-muted">
+                No meetings yet. Create your first one.
+              </p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-separator">
+                {recentMeetings.map((meeting) => (
+                  <li
+                    className="flex flex-col gap-0.5 py-3 first:pt-0 last:pb-0"
+                    key={meeting.id}
+                  >
+                    <span className="text-sm font-medium text-foreground">
+                      {meeting.title}
+                    </span>
+                    <time
+                      className="text-xs text-muted"
+                      dateTime={meeting.createdAt}
+                    >
+                      {dateFormatter.format(new Date(meeting.createdAt))}
+                    </time>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card.Content>
+        </Card>
       </main>
-    </div>
+
+      <CreateMeetingDialog
+        onCreated={(meeting) =>
+          setMeetings((current) => sortByNewest([...(current ?? []), meeting]))
+        }
+        onUnauthorized={signOut}
+        state={createDialog}
+        token={token}
+      />
+    </>
   );
 }

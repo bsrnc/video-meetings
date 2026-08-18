@@ -7,11 +7,18 @@
  * below the WCAG AA 4.5:1 threshold. Darkened for light mode; the dark theme
  * keeps a lighter accent so the ring stays visible on a dark background.
  */
+/*
+ * The stock light `--muted` (#71717a) renders at 4.43:1 on `--background`,
+ * just under the WCAG AA 4.5:1 threshold, and every secondary line on the home
+ * page uses it. Darkened to 5.05:1 on the page background / 5.51:1 on a Card.
+ * The dark theme's muted already measures 7.72:1, so it is left alone.
+ */
 :root,
 [data-theme='light'] {
   --accent: oklch(52% 0.17 253.83);
   --field-border: oklch(62% 0.004 286.32);
   --field-border-width: 1px;
+  --muted: oklch(52% 0.016 286);
   color-scheme: light;
 }
 

@@ -27,17 +27,37 @@ npm run typecheck      # tsc --noEmit
 
 ## Architecture
 
-- App Router under `app/`, no `src/` directory.
+- App Router under `app/`, no `src/` directory. Shared UI lives in `components/`, framework-free helpers in `lib/` — both at the project root, imported via `@/`.
 - Path alias `@/*` → project root (`tsconfig.json`).
 - Tailwind CSS v4 + HeroUI v3 (`@heroui/react`) for UI. No `<HeroUIProvider>` needed (v3 dropped it). `app/globals.css` imports `tailwindcss` then `@heroui/styles`, in that order. `postcss.config.mjs` wires `@tailwindcss/postcss`.
 - HeroUI v3 uses compound components (`Card.Header`, not a `title` prop) and `onPress` instead of `onClick`. See `~/.claude/skills/heroui-react` for docs-fetch scripts before adding new components.
 - **Every base reset in `app/globals.css` must stay inside `@layer base`.** Unlayered CSS beats every layered rule regardless of specificity, so an unlayered `* { padding: 0; margin: 0 }` silently strips all Tailwind `p-*`/`m-*` utilities and all HeroUI component padding.
-- Theming: HeroUI v3 resolves its palette from `[data-theme="light"|"dark"]` on `<html>`. A `beforeInteractive` `next/script` in `app/layout.tsx` sets the attribute from `prefers-color-scheme` before first paint and keeps it in sync; a media query alone only reaches `color-scheme` and leaves HeroUI surfaces light. `app/globals.css` overrides a few theme tokens for contrast: `--accent` (stock value fails AA for white button text) and `--field-border`/`--field-border-width` (stock fields are the same colour as the Card they sit on with a transparent border, so they have no visible boundary at all in dark mode).
+- Theming: HeroUI v3 resolves its palette from `[data-theme="light"|"dark"]` on `<html>`. A `beforeInteractive` `next/script` in `app/layout.tsx` sets the attribute from `prefers-color-scheme` before first paint and keeps it in sync; a media query alone only reaches `color-scheme` and leaves HeroUI surfaces light. `app/globals.css` overrides a few theme tokens for contrast: `--accent` (stock value fails AA for white button text), `--field-border`/`--field-border-width` (stock fields are the same colour as the Card they sit on with a transparent border, so they have no visible boundary at all in dark mode), and light-mode `--muted` (stock `#71717a` measures 4.43:1 on `--background`, just under AA; the override reaches 5.05:1 there and 5.51:1 on a Card). Dark-mode `--muted` already measures 7.72:1 and is left alone.
+- HeroUI ships BEM component classes, so a `next/link` styled as a HeroUI link just takes `className="link"`. `.link` is `no-underline` with underline on hover only, so inline links inside a sentence add `underline` to stay distinguishable without relying on colour (WCAG 1.4.1).
 - Note for sizing work: `size="lg"` on HeroUI `Button` resolves to 40px in `@heroui/styles` 3.2.4 — under the 44px minimum touch target — so heights that matter are set explicitly.
 - `NEXT_PUBLIC_API_URL` (`.env.local`, gitignored; see `.env.example`) points at the API — defaults to `http://localhost:3001` in code if unset. The API defaults to port 3000 same as this app, so `apps/api/.env` sets `PORT=3001` to avoid the clash; CORS is enabled API-side (`app.enableCors()` in `apps/api/src/main.ts`) since browser requests cross origins.
-- `app/register/page.tsx` — client component, registration form (email + password) built with HeroUI `Form`/`TextField`/`Button`/`Alert`. Posts to `POST {NEXT_PUBLIC_API_URL}/auth/register`; on success stores `accessToken` in `localStorage` and redirects to `/`; surfaces 409 (duplicate email) and 400 (validation) API errors in an alert that takes focus. Carries `autoComplete="email"`/`"new-password"` for password managers, a show/hide password toggle, and distinct "required" vs "malformed" validation messages. `app/register/layout.tsx` exists only to attach page metadata, which a client component cannot export. No test coverage — this app has no test infra yet; verified manually via dev server.
-- Known gaps on the registration flow, deliberately not built: there is no `/login` route to link to, and `accessToken` lives in `localStorage` (reachable by any XSS) — moving it to an httpOnly cookie needs the API to set the cookie plus credentialed CORS.
-- Skeleton otherwise: default `create-next-app` template (`app/layout.tsx`, `app/page.tsx`), no other routes or features built yet.
+
+### Routes
+
+Every page below is a client component (they all read `localStorage` or attach event handlers), so each one that needs page metadata carries a sibling `layout.tsx` that exists only to export it — a client component cannot export `metadata`.
+
+- `app/register/page.tsx` — registration form (email + password). Posts to `POST {NEXT_PUBLIC_API_URL}/auth/register`; on success stores `accessToken` in `localStorage` and redirects to `/`; surfaces 409 (duplicate email) and 400 (validation) API errors. Distinct "required" vs "malformed" validation messages; links to `/auth/login`.
+- `app/auth/login/page.tsx` — sign-in form (email + password). Posts to `POST {NEXT_PUBLIC_API_URL}/auth/login`, stores the token the same way, redirects to `/`, and surfaces the API's 401 (`Invalid email or password`) in the same alert. Password validation here is presence-only: the length rules belong to sign-up, and the API is the authority on whether an existing password matches. Links to `/register`.
+- `app/page.tsx` — the signed-in home page. Reads the token via `useIsHydrated()` (so the first render matches the server markup), redirects to `/auth/login` when it is missing, malformed, or expired, and greets the user with the email decoded out of the JWT. Loads `GET /meetings` with a bearer token for the total count and the 3 newest meetings, and opens a `Modal` that `POST`s a new meeting and folds the result into the list without a refetch. A 401 from either request signs the user out. Every request has an explicit loading, empty, and error rendering.
+
+### Shared modules
+
+- `lib/api.ts` — `API_URL`, plus `parseErrorMessage` (Nest returns `message` as a string, or an array of strings from `ValidationPipe`) and the shared network-failure copy.
+- `lib/auth.ts` — `localStorage` token accessors and `decodeAccessToken`, which base64url-decodes the JWT payload **without verifying the signature**. That is enough to render the email and to skip a request that would 401; the API remains the only thing that decides whether a token is valid.
+- `lib/validation.ts` — email and password field validators shared by the two auth forms.
+- `lib/meetings.ts` — the `Meeting` shape as serialized over JSON, and `sortByNewest` (`GET /meetings` returns insertion order, not sorted).
+- `components/password-field.tsx` — password input with the show/hide toggle, used by both auth forms.
+- `components/form-error-alert.tsx` — server-error alert that takes focus when it appears, so a failed submit is announced instead of leaving focus on the body.
+- `components/create-meeting-dialog.tsx` — the home page's "Create meeting" modal.
+
+### Known gaps
+
+Deliberately not built: `accessToken` lives in `localStorage` (reachable by any XSS) — moving it to an httpOnly cookie needs the API to set the cookie plus credentialed CORS. The `/` route gate is client-side only, so it hides UI rather than protecting data; the API guard is what actually protects the meetings. Meetings are not scoped to their creator API-side, so the count and list on `/` are global, not the signed-in user's. There is no test infra in this app — all of the above was verified manually against a running dev server and API.
 
 ## UI changes — definition of done
 
@@ -47,3 +67,5 @@ Any change to the UI must be verified visually before it is considered complete:
 2. Review the result with the `ui-ux-pro-max` skill (accessibility, contrast, typography, spacing, interaction) and address what it surfaces.
 
 A UI task is not done until both steps have been performed.
+
+All screenshots save to /screenshot folder

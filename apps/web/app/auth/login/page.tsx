@@ -17,14 +17,9 @@ import { FormErrorAlert } from '@/components/form-error-alert';
 import { PasswordField } from '@/components/password-field';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
 import { storeToken } from '@/lib/auth';
-import {
-  MAX_PASSWORD_LENGTH,
-  MIN_PASSWORD_LENGTH,
-  validateEmail,
-  validateNewPassword,
-} from '@/lib/validation';
+import { validateEmail, validateExistingPassword } from '@/lib/validation';
 
-export default function RegisterPage() {
+export default function LoginPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -39,7 +34,7 @@ export default function RegisterPage() {
 
     setIsSubmitting(true);
     try {
-      const response = await fetch(`${API_URL}/auth/register`, {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -67,10 +62,10 @@ export default function RegisterPage() {
       <Card className="w-full max-w-sm gap-6 p-6">
         <Card.Header className="gap-2">
           <h1 className="text-xl leading-7 font-semibold text-foreground">
-            Create your account
+            Sign in
           </h1>
           <Card.Description>
-            Sign up with your email to start scheduling meetings.
+            Enter your email and password to reach your meetings.
           </Card.Description>
         </Card.Header>
 
@@ -95,11 +90,8 @@ export default function RegisterPage() {
             </TextField>
 
             <PasswordField
-              autoComplete="new-password"
-              description={`Must be at least ${MIN_PASSWORD_LENGTH} characters.`}
-              maxLength={MAX_PASSWORD_LENGTH}
-              minLength={MIN_PASSWORD_LENGTH}
-              validate={validateNewPassword}
+              autoComplete="current-password"
+              validate={validateExistingPassword}
             />
 
             {/* `size="lg"` resolves to 40px in @heroui/styles 3.2.4, under the
@@ -114,7 +106,7 @@ export default function RegisterPage() {
               {({ isPending }) => (
                 <>
                   {isPending ? <Spinner color="current" size="sm" /> : null}
-                  {isPending ? 'Creating account…' : 'Create account'}
+                  {isPending ? 'Signing in…' : 'Sign in'}
                 </>
               )}
             </Button>
@@ -123,9 +115,9 @@ export default function RegisterPage() {
 
         <Card.Footer className="justify-center">
           <p className="text-sm text-muted">
-            Already have an account?{' '}
-            <Link className="link underline" href="/auth/login">
-              Sign in
+            No account yet?{' '}
+            <Link className="link underline" href="/register">
+              Create one
             </Link>
           </p>
         </Card.Footer>
