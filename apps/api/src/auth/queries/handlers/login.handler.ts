@@ -1,7 +1,8 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
+import { IQueryHandler, QueryBus, QueryHandler } from '@nestjs/cqrs';
 import * as bcrypt from 'bcrypt';
-import { UsersService } from '../../../users/users.service';
+import { User } from '@prisma/client';
+import { FindUserByEmailQuery } from '../../../users/queries/find-user-by-email.query';
 import { AuthTokenService } from '../../auth-token.service';
 import { LoginQuery } from '../login.query';
 
@@ -11,12 +12,14 @@ export class LoginHandler implements IQueryHandler<
   { accessToken: string }
 > {
   constructor(
-    private readonly usersService: UsersService,
+    private readonly queryBus: QueryBus,
     private readonly authTokenService: AuthTokenService,
   ) {}
 
   async execute(query: LoginQuery): Promise<{ accessToken: string }> {
-    const user = await this.usersService.findByEmail(query.email);
+    const user = await this.queryBus.execute<FindUserByEmailQuery, User | null>(
+      new FindUserByEmailQuery(query.email),
+    );
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }

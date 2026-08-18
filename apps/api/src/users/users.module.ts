@@ -10,6 +10,5 @@ const QueryHandlers = [FindUserByEmailHandler];
 @Module({
   imports: [CqrsModule],
   providers: [UsersService, ...CommandHandlers, ...QueryHandlers],
-  exports: [UsersService],
 })
 export class UsersModule {}

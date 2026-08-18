@@ -1,7 +1,14 @@
 import { ConflictException } from '@nestjs/common';
-import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import {
+  CommandBus,
+  CommandHandler,
+  ICommandHandler,
+  QueryBus,
+} from '@nestjs/cqrs';
 import * as bcrypt from 'bcrypt';
-import { UsersService } from '../../../users/users.service';
+import { User } from '@prisma/client';
+import { CreateUserCommand } from '../../../users/commands/create-user.command';
+import { FindUserByEmailQuery } from '../../../users/queries/find-user-by-email.query';
 import { AuthTokenService } from '../../auth-token.service';
 import { RegisterCommand } from '../register.command';
 
@@ -13,12 +20,16 @@ export class RegisterHandler implements ICommandHandler<
   { accessToken: string }
 > {
   constructor(
-    private readonly usersService: UsersService,
+    private readonly commandBus: CommandBus,
+    private readonly queryBus: QueryBus,
     private readonly authTokenService: AuthTokenService,
   ) {}
 
   async execute(command: RegisterCommand): Promise<{ accessToken: string }> {
-    const existingUser = await this.usersService.findByEmail(command.email);
+    const existingUser = await this.queryBus.execute<
+      FindUserByEmailQuery,
+      User | null
+    >(new FindUserByEmailQuery(command.email));
     if (existingUser) {
       throw new ConflictException('Email is already registered');
     }
@@ -27,7 +38,9 @@ export class RegisterHandler implements ICommandHandler<
       command.password,
       PASSWORD_HASH_ROUNDS,
     );
-    const user = await this.usersService.create(command.email, passwordHash);
+    const user = await this.commandBus.execute<CreateUserCommand, User>(
+      new CreateUserCommand(command.email, passwordHash),
+    );
 
     return { accessToken: this.authTokenService.sign(user.id, user.email) };
   }
