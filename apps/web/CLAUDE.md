@@ -29,5 +29,21 @@ npm run typecheck      # tsc --noEmit
 
 - App Router under `app/`, no `src/` directory.
 - Path alias `@/*` → project root (`tsconfig.json`).
-- No Tailwind — plain CSS (`app/globals.css`).
-- Skeleton only: default `create-next-app` template (`app/layout.tsx`, `app/page.tsx`), no routes or features built yet.
+- Tailwind CSS v4 + HeroUI v3 (`@heroui/react`) for UI. No `<HeroUIProvider>` needed (v3 dropped it). `app/globals.css` imports `tailwindcss` then `@heroui/styles`, in that order. `postcss.config.mjs` wires `@tailwindcss/postcss`.
+- HeroUI v3 uses compound components (`Card.Header`, not a `title` prop) and `onPress` instead of `onClick`. See `~/.claude/skills/heroui-react` for docs-fetch scripts before adding new components.
+- **Every base reset in `app/globals.css` must stay inside `@layer base`.** Unlayered CSS beats every layered rule regardless of specificity, so an unlayered `* { padding: 0; margin: 0 }` silently strips all Tailwind `p-*`/`m-*` utilities and all HeroUI component padding.
+- Theming: HeroUI v3 resolves its palette from `[data-theme="light"|"dark"]` on `<html>`. A `beforeInteractive` `next/script` in `app/layout.tsx` sets the attribute from `prefers-color-scheme` before first paint and keeps it in sync; a media query alone only reaches `color-scheme` and leaves HeroUI surfaces light. `app/globals.css` overrides a few theme tokens for contrast: `--accent` (stock value fails AA for white button text) and `--field-border`/`--field-border-width` (stock fields are the same colour as the Card they sit on with a transparent border, so they have no visible boundary at all in dark mode).
+- Note for sizing work: `size="lg"` on HeroUI `Button` resolves to 40px in `@heroui/styles` 3.2.4 — under the 44px minimum touch target — so heights that matter are set explicitly.
+- `NEXT_PUBLIC_API_URL` (`.env.local`, gitignored; see `.env.example`) points at the API — defaults to `http://localhost:3001` in code if unset. The API defaults to port 3000 same as this app, so `apps/api/.env` sets `PORT=3001` to avoid the clash; CORS is enabled API-side (`app.enableCors()` in `apps/api/src/main.ts`) since browser requests cross origins.
+- `app/register/page.tsx` — client component, registration form (email + password) built with HeroUI `Form`/`TextField`/`Button`/`Alert`. Posts to `POST {NEXT_PUBLIC_API_URL}/auth/register`; on success stores `accessToken` in `localStorage` and redirects to `/`; surfaces 409 (duplicate email) and 400 (validation) API errors in an alert that takes focus. Carries `autoComplete="email"`/`"new-password"` for password managers, a show/hide password toggle, and distinct "required" vs "malformed" validation messages. `app/register/layout.tsx` exists only to attach page metadata, which a client component cannot export. No test coverage — this app has no test infra yet; verified manually via dev server.
+- Known gaps on the registration flow, deliberately not built: there is no `/login` route to link to, and `accessToken` lives in `localStorage` (reachable by any XSS) — moving it to an httpOnly cookie needs the API to set the cookie plus credentialed CORS.
+- Skeleton otherwise: default `create-next-app` template (`app/layout.tsx`, `app/page.tsx`), no other routes or features built yet.
+
+## UI changes — definition of done
+
+Any change to the UI must be verified visually before it is considered complete:
+
+1. Run the app (`npm run dev:web` from the repo root) and open the affected screens in a browser (Playwright/Chrome MCP tooling is available) — confirm the change renders and behaves as intended, including interactive states and error paths.
+2. Review the result with the `ui-ux-pro-max` skill (accessibility, contrast, typography, spacing, interaction) and address what it surfaces.
+
+A UI task is not done until both steps have been performed.

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 npm-workspaces monorepo (`workspaces: ["apps/*"]`, single root `package-lock.json`). Two independent apps, no shared packages yet:
 
-- `apps/web` — Next.js 16 (App Router, TypeScript, no `src/`, no Tailwind). See `apps/web/CLAUDE.md`.
+- `apps/web` — Next.js 16 (App Router, TypeScript, no `src/`, Tailwind v4 + HeroUI v3). See `apps/web/CLAUDE.md`.
 - `apps/api` — Nest.js 11 (TypeScript). See `apps/api/CLAUDE.md`.
 
 Always run `npm install` from the repo root, never inside `apps/*` — there is one shared lockfile.

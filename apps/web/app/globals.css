@@ -1,49 +1,69 @@
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@import 'tailwindcss';
+@import '@heroui/styles';
+
+/*
+ * Theme token overrides.
+ * The stock HeroUI accent (oklch 62.04%) renders white button text at 3.59:1,
+ * below the WCAG AA 4.5:1 threshold. Darkened for light mode; the dark theme
+ * keeps a lighter accent so the ring stays visible on a dark background.
+ */
+:root,
+[data-theme='light'] {
+  --accent: oklch(52% 0.17 253.83);
+  --field-border: oklch(62% 0.004 286.32);
+  --field-border-width: 1px;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/*
+ * Stock fields are the same colour as the Card they sit on with a transparent
+ * border, which leaves them with no visible boundary at all in dark mode
+ * (measured 1:1 against the card). WCAG 1.4.11 wants 3:1 for control
+ * boundaries, so both themes get an explicit field border.
+ */
+[data-theme='dark'] {
+  --accent: oklch(68% 0.16 253.83);
+  --accent-foreground: var(--eclipse);
+  --field-border: oklch(52% 0.008 286.32);
+  --field-border-width: 1px;
+  color-scheme: dark;
+}
+
+/*
+ * Base resets must live inside the `base` layer. Unlayered rules beat every
+ * layered rule regardless of specificity, so an unlayered `*` reset would
+ * silently kill every Tailwind `p-*` / `m-*` utility and all HeroUI padding.
+ */
+@layer base {
+  * {
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
   }
-}
 
-html {
-  height: 100%;
-}
-
-html,
-body {
-  max-width: 100vw;
-  overflow-x: hidden;
-}
-
-body {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-* {
-  box-sizing: border-box;
-  padding: 0;
-  margin: 0;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-@media (prefers-color-scheme: dark) {
   html {
-    color-scheme: dark;
+    height: 100%;
+  }
+
+  html,
+  body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    color: var(--foreground);
+    background: var(--background);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
   }
 }

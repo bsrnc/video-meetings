@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsEmail()
@@ -6,5 +6,7 @@ export class RegisterDto {
 
   @IsString()
   @MinLength(8)
+  // bcrypt silently truncates input past 72 bytes; reject it instead.
+  @MaxLength(72)
   password: string;
 }
