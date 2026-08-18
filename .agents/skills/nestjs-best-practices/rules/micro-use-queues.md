@@ -76,9 +76,7 @@ export class QueueModule {}
 // Producer: Add jobs to queue
 @Injectable()
 export class ReportsService {
-  constructor(
-    @InjectQueue('reports') private reportsQueue: Queue,
-  ) {}
+  constructor(@InjectQueue('reports') private reportsQueue: Queue) {}
 
   async requestReport(dto: GenerateReportDto): Promise<{ jobId: string }> {
     // Return immediately, process in background

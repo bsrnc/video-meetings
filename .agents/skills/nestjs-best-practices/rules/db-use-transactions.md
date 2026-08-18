@@ -21,7 +21,11 @@ export class OrdersService {
 
     for (const item of items) {
       await this.orderItemRepo.save({ orderId: order.id, ...item });
-      await this.inventoryRepo.decrement({ productId: item.productId }, 'stock', item.quantity);
+      await this.inventoryRepo.decrement(
+        { productId: item.productId },
+        'stock',
+        item.quantity,
+      );
     }
 
     await this.paymentService.charge(order.id);

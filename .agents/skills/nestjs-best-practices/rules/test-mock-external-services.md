@@ -84,11 +84,11 @@ describe('WeatherService', () => {
   });
 
   it('should handle API timeout', async () => {
-    httpService.get.mockReturnValue(
-      throwError(() => new Error('ETIMEDOUT')),
-    );
+    httpService.get.mockReturnValue(throwError(() => new Error('ETIMEDOUT')));
 
-    await expect(service.getWeather('NYC')).rejects.toThrow('Weather service unavailable');
+    await expect(service.getWeather('NYC')).rejects.toThrow(
+      'Weather service unavailable',
+    );
   });
 
   it('should handle rate limiting', async () => {
@@ -98,7 +98,9 @@ describe('WeatherService', () => {
       })),
     );
 
-    await expect(service.getWeather('NYC')).rejects.toThrow(TooManyRequestsException);
+    await expect(service.getWeather('NYC')).rejects.toThrow(
+      TooManyRequestsException,
+    );
   });
 });
 

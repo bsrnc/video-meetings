@@ -139,7 +139,9 @@ describe('RolesGuard', () => {
   });
 });
 
-function createMockExecutionContext(request: Partial<Request>): ExecutionContext {
+function createMockExecutionContext(
+  request: Partial<Request>,
+): ExecutionContext {
   return {
     switchToHttp: () => ({
       getRequest: () => request,

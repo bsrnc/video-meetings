@@ -127,9 +127,7 @@ describe('Protected Routes (e2e)', () => {
   });
 
   it('should return 401 without token', () => {
-    return request(app.getHttpServer())
-      .get('/users/me')
-      .expect(401);
+    return request(app.getHttpServer()).get('/users/me').expect(401);
   });
 
   it('should return user profile with valid token', () => {
