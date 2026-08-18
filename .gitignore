@@ -28,6 +28,9 @@ yarn-error.log*
 # Caches
 .cache/
 .turbo/
+
+# Husky internals
+.husky/_
 .eslintcache
 
 # Coverage

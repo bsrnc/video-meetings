@@ -32,6 +32,8 @@ npm run start:api          # apps/api production server (after build)
 npm run lint                # both apps, check only
 npm run lint:fix            # both apps, autofix
 
+npm run test                 # both apps, --if-present (only apps/api has a test script today)
+
 npm run typecheck           # both apps, tsc --noEmit
 
 npm run format               # prettier --write, whole repo
@@ -46,6 +48,10 @@ To run a single app's own scripts directly (e.g. Nest test commands not exposed 
 
 - Each app owns its own ESLint flat config (`apps/web/eslint.config.mjs`, `apps/api/eslint.config.mjs`) with its framework's rules. The root has no ESLint config of its own.
 - Prettier config is shared from the root `.prettierrc.json` (`singleQuote`, `trailingComma: all`) and applies repo-wide. `apps/api` also carries its own identical `.prettierrc` from the Nest generator — harmless duplicate, nearest-config-wins resolution, values match.
+
+## Git hooks
+
+Husky manages Git hooks (`.husky/`). `pre-commit` runs `npm run lint && npm run test` (both workspaces, root scripts) before every commit — a failing lint or test blocks the commit. `prepare` in root `package.json` installs the hooks on `npm install`.
 
 ## Keeping docs in sync
 
