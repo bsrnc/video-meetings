@@ -20,8 +20,20 @@ const FILE_ERROR_ID = `${FILE_INPUT_ID}-error`;
 interface RecordingUploadProps {
   meeting: Meeting;
   token: string;
+  /**
+   * Called right as the upload request is sent, so the page can reflect
+   * `recordingStatus: 'UPLOADING'` immediately — the API sets that status at
+   * the same moment, before it starts moving the file to storage.
+   */
+  onUploadStarted: () => void;
   /** Receives the meeting as the API returned it after a successful upload. */
   onUploaded: (meeting: Meeting) => void;
+  /**
+   * Called when the upload request itself fails (the API rejected it, or the
+   * request never reached it) — not when the file was rejected before ever
+   * being sent. Lets the page re-fetch the meeting's authoritative status.
+   */
+  onUploadFailed: () => void;
   /** Called when the API rejects the token, so the page can sign the user out. */
   onUnauthorized: () => void;
 }
@@ -35,7 +47,9 @@ interface RecordingUploadProps {
 export function RecordingUpload({
   meeting,
   token,
+  onUploadStarted,
   onUploaded,
+  onUploadFailed,
   onUnauthorized,
 }: RecordingUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,6 +67,10 @@ export function RecordingUpload({
   // A meeting whose last upload failed server-side still needs the picker, so
   // only a saved recording hides it — until "Replace recording" asks for it.
   const isPickerVisible = !isSaved || isReplacing;
+  // `recordingStatus: 'UPLOADING'` can be this tab's own request, or one the
+  // status poll picked up from elsewhere — either way, a second upload for
+  // the same meeting would only race the first at the same storage key.
+  const isBusy = isUploading || meeting.recordingStatus === 'UPLOADING';
 
   const clearPicker = () => {
     setFile(null);
@@ -90,6 +108,7 @@ export function RecordingUpload({
     setFileError(null);
     setUploadError(null);
     setIsUploading(true);
+    onUploadStarted();
 
     try {
       const body = new FormData();
@@ -112,6 +131,7 @@ export function RecordingUpload({
       }
       if (!response.ok) {
         setUploadError(recordingUploadErrorMessage(response.status));
+        onUploadFailed();
         return;
       }
 
@@ -120,6 +140,7 @@ export function RecordingUpload({
       clearPicker();
     } catch {
       setUploadError(NETWORK_ERROR_MESSAGE);
+      onUploadFailed();
     } finally {
       setIsUploading(false);
     }
@@ -127,30 +148,51 @@ export function RecordingUpload({
 
   return (
     <div className="flex flex-col gap-4">
-      {isSaved ? (
-        <Alert status="success">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>Recording saved</Alert.Title>
-            <Alert.Description>
-              This meeting has a recording stored and ready.
-            </Alert.Description>
-          </Alert.Content>
-        </Alert>
-      ) : null}
+      {/* One live region for all three status alerts: recordingStatus can
+          change from a poll picking up someone else's upload, not just this
+          tab's own submit, so the transition needs to reach a screen reader
+          without depending on focus already being here. */}
+      <div aria-atomic="true" aria-live="polite">
+        {meeting.recordingStatus === 'UPLOADING' ? (
+          <Alert status="accent">
+            <Alert.Indicator>
+              <Spinner color="current" size="sm" />
+            </Alert.Indicator>
+            <Alert.Content>
+              <Alert.Title>Uploading recording…</Alert.Title>
+              <Alert.Description>
+                This can take a while for a large file. This page updates on its
+                own once it finishes.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
 
-      {meeting.recordingStatus === 'ERROR' ? (
-        <Alert status="warning">
-          <Alert.Indicator />
-          <Alert.Content>
-            <Alert.Title>The last upload did not finish</Alert.Title>
-            <Alert.Description>
-              Nothing is stored for this meeting yet. Upload the recording
-              again.
-            </Alert.Description>
-          </Alert.Content>
-        </Alert>
-      ) : null}
+        {isSaved ? (
+          <Alert status="success">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>Recording saved</Alert.Title>
+              <Alert.Description>
+                This meeting has a recording stored and ready.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+
+        {meeting.recordingStatus === 'ERROR' ? (
+          <Alert status="warning">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>The last upload did not finish</Alert.Title>
+              <Alert.Description>
+                Nothing is stored for this meeting yet. Upload the recording
+                again.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert>
+        ) : null}
+      </div>
 
       {isSaved && !isReplacing ? (
         <Button
@@ -183,7 +225,7 @@ export function RecordingUpload({
                 }
                 aria-invalid={fileError !== null}
                 className="peer sr-only"
-                disabled={isUploading}
+                disabled={isBusy}
                 id={FILE_INPUT_ID}
                 name="file"
                 onChange={handleFileChange}
@@ -224,6 +266,7 @@ export function RecordingUpload({
           <div className="flex flex-wrap items-center gap-3">
             <Button
               className="h-12"
+              isDisabled={isBusy}
               isPending={isUploading}
               size="lg"
               type="submit"

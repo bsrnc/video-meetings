@@ -26,6 +26,14 @@ export const RECORDING_SAVE_FAILED_MESSAGE =
 export const RECORDING_NO_FILE_MESSAGE = 'Choose a recording file to upload.';
 
 /**
+ * How often the meeting page re-fetches `GET /meetings/:id` while
+ * `recordingStatus` is `UPLOADING`. Catches an upload started in another tab
+ * or a previous page load — the tab doing the actual `POST` learns the
+ * outcome from its own response and does not need to wait for a poll tick.
+ */
+export const RECORDING_STATUS_POLL_INTERVAL_MS = 3000;
+
+/**
  * Rejects what the API would certainly reject, before spending an upload on
  * it. Deliberately narrow: the browser reports an empty `type` for extensions
  * it does not know, and the API's magic-byte check — not the file's declared

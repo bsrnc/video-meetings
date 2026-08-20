@@ -269,3 +269,149 @@ test.describe('meeting recording upload', () => {
     await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 });
+
+// Phase 3: the page reflects UPLOADING/READY/ERROR as they happen, without a
+// manual reload — via the immediate response to this tab's own request, and
+// via polling for a status change made elsewhere.
+test.describe('meeting recording status updates without a reload', () => {
+  test('shows the Uploading status while the request is in flight, then Ready', async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    let stored = meetingWithoutRecording;
+    let resolveUpload: () => void = () => undefined;
+    const uploadStarted = new Promise<void>((resolve) => {
+      resolveUpload = resolve;
+    });
+
+    await page.route(MEETING_URL, (route) => fulfillJson(route, 200, stored));
+    await page.route(RECORDING_URL, async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await fulfillPreflight(route);
+        return;
+      }
+      // Held open until the test has seen the Uploading status, so the
+      // transient state is not too fast to observe.
+      await uploadStarted;
+      stored = meetingWithRecording;
+      await fulfillJson(route, 201, stored);
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+    await page.locator('#recording-file').setInputFiles(wavFile());
+    await page.getByRole('button', { name: 'Upload recording' }).click();
+
+    await expect(page.getByText('Uploading recording…')).toBeVisible();
+    await expect(page.getByText('Recording saved')).toBeHidden();
+
+    resolveUpload();
+
+    await expect(page.getByText('Recording saved')).toBeVisible();
+    await expect(page.getByText('Uploading recording…')).toBeHidden();
+  });
+
+  test('shows the Uploading status, then Error, after a save that fails server-side', async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    const meetingErrored = {
+      ...meetingWithoutRecording,
+      recordingStatus: 'ERROR' as const,
+      recordingError: 'Не удалось сохранить запись',
+    };
+    let stored = meetingWithoutRecording;
+
+    await page.route(MEETING_URL, (route) => fulfillJson(route, 200, stored));
+    await page.route(RECORDING_URL, async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await fulfillPreflight(route);
+        return;
+      }
+      // A failure past validation — the kind the API answers with its own
+      // recordingStatus: ERROR, not a 4xx this app maps to its own copy.
+      stored = meetingErrored;
+      await fulfillJson(route, 500, {
+        statusCode: 500,
+        message: 'Не удалось сохранить запись',
+      });
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+    await page.locator('#recording-file').setInputFiles(wavFile());
+    await page.getByRole('button', { name: 'Upload recording' }).click();
+
+    // The rejection is reported straight away...
+    await expect(page.getByRole('main').getByRole('alert')).toContainText(
+      'Could not save the recording. Please try again.',
+    );
+    // ...and the page also picks up the API's own ERROR status, rather than
+    // only showing this tab's transient failure message.
+    await expect(
+      page.getByText('The last upload did not finish'),
+    ).toBeVisible();
+    await expect(page.getByText('Uploading recording…')).toBeHidden();
+  });
+
+  test('polls for a status change made elsewhere and reflects it, Ready', async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    let getCalls = 0;
+    await page.route(MEETING_URL, (route) => {
+      getCalls += 1;
+      const body =
+        getCalls === 1
+          ? {
+              ...meetingWithoutRecording,
+              recordingStatus: 'UPLOADING' as const,
+            }
+          : meetingWithRecording;
+      return fulfillJson(route, 200, body);
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+
+    // Nothing on this page ever POSTs — the status is only ever read.
+    await expect(page.getByText('Uploading recording…')).toBeVisible();
+    await expect(page.getByText('Recording saved')).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText('Uploading recording…')).toBeHidden();
+    expect(getCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  test('polls for a status change made elsewhere and reflects it, Error', async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    let getCalls = 0;
+    await page.route(MEETING_URL, (route) => {
+      getCalls += 1;
+      const body =
+        getCalls === 1
+          ? {
+              ...meetingWithoutRecording,
+              recordingStatus: 'UPLOADING' as const,
+            }
+          : {
+              ...meetingWithoutRecording,
+              recordingStatus: 'ERROR' as const,
+              recordingError: 'Не удалось сохранить запись',
+            };
+      return fulfillJson(route, 200, body);
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+
+    await expect(page.getByText('Uploading recording…')).toBeVisible();
+    await expect(page.getByText('The last upload did not finish')).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByText('Uploading recording…')).toBeHidden();
+    expect(getCalls).toBeGreaterThanOrEqual(2);
+  });
+});

@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, Spinner } from '@heroui/react';
 import { AppHeader } from '@/components/app-header';
@@ -9,6 +9,7 @@ import { RecordingUpload } from '@/components/recording-upload';
 import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
 import { MEETING_GONE_MESSAGE, type Meeting } from '@/lib/meetings';
+import { RECORDING_STATUS_POLL_INTERVAL_MS } from '@/lib/recording';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
@@ -36,19 +37,19 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
   const meeting = current?.meeting ?? null;
   const loadError = current?.error ?? null;
 
-  useEffect(() => {
-    if (!token || !email) {
-      return;
-    }
-
-    let isStale = false;
-    void (async () => {
+  /**
+   * Shared by the initial load, the `UPLOADING` poll, and a refetch after a
+   * rejected upload — all three just need "what does the API say about this
+   * meeting right now".
+   */
+  const fetchMeeting = useCallback(
+    async (isStale: () => boolean) => {
       try {
         const response = await fetch(`${API_URL}/meetings/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        if (isStale) {
+        if (isStale()) {
           return;
         }
         if (response.status === 401) {
@@ -62,27 +63,58 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
             response.status === 404
               ? MEETING_GONE_MESSAGE
               : await parseErrorMessage(response);
-          if (!isStale) {
+          if (!isStale()) {
             setLoaded({ id, error });
           }
           return;
         }
 
         const data = (await response.json()) as Meeting;
-        if (!isStale) {
+        if (!isStale()) {
           setLoaded({ id, meeting: data });
         }
       } catch {
-        if (!isStale) {
+        if (!isStale()) {
           setLoaded({ id, error: NETWORK_ERROR_MESSAGE });
         }
       }
+    },
+    [id, token, signOut],
+  );
+
+  useEffect(() => {
+    if (!token || !email) {
+      return;
+    }
+
+    let isStale = false;
+    void (async () => {
+      await fetchMeeting(() => isStale);
     })();
 
     return () => {
       isStale = true;
     };
-  }, [email, id, signOut, token]);
+  }, [email, fetchMeeting, token]);
+
+  // While the recording is UPLOADING, poll for the outcome instead of
+  // waiting for a manual reload — catches an upload started in another tab,
+  // or one still in flight from a previous visit to this page.
+  useEffect(() => {
+    if (!token || !email || meeting?.recordingStatus !== 'UPLOADING') {
+      return;
+    }
+
+    let isStale = false;
+    const intervalId = setInterval(() => {
+      void fetchMeeting(() => isStale);
+    }, RECORDING_STATUS_POLL_INTERVAL_MS);
+
+    return () => {
+      isStale = true;
+      clearInterval(intervalId);
+    };
+  }, [email, fetchMeeting, meeting?.recordingStatus, token]);
 
   // Nothing is rendered until the gate has run, so a signed-out visitor never
   // sees the page contents flash before the redirect.
@@ -140,6 +172,26 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
                   key={meeting.id}
                   meeting={meeting}
                   onUnauthorized={signOut}
+                  onUploadFailed={() => {
+                    // The rejection may or may not have changed the server's
+                    // recordingStatus (a validation failure never touches it;
+                    // a storage failure sets it to ERROR) — refetch rather
+                    // than guess which.
+                    void fetchMeeting(() => false);
+                  }}
+                  onUploadStarted={() =>
+                    setLoaded((previous) =>
+                      previous?.id === meeting.id && previous.meeting
+                        ? {
+                            id: previous.id,
+                            meeting: {
+                              ...previous.meeting,
+                              recordingStatus: 'UPLOADING',
+                            },
+                          }
+                        : previous,
+                    )
+                  }
                   onUploaded={(updated) =>
                     setLoaded({ id: updated.id, meeting: updated })
                   }
