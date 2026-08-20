@@ -32,7 +32,8 @@ npm run start:api          # apps/api production server (after build)
 npm run lint                # both apps, check only
 npm run lint:fix            # both apps, autofix
 
-npm run test                 # both apps, --if-present (only apps/api has a test script today)
+npm run test                 # both apps, --if-present (only apps/api has a `test` script)
+npm run test:e2e:web         # apps/web Playwright specs (needs `npx playwright install chromium` once)
 
 npm run typecheck           # both apps, tsc --noEmit
 
@@ -41,6 +42,10 @@ npm run format:check         # prettier --check, whole repo
 ```
 
 There is no root-level `start` script — only `start:web` / `start:api`.
+
+`apps/web`'s Playwright specs are wired as `test:e2e`, not `test`, so the
+pre-commit hook does not start a dev server and a browser on every commit;
+run them with `npm run test:e2e:web`.
 
 To run a single app's own scripts directly (e.g. Nest test commands not exposed at root): `npm run <script> --workspace apps/api`.
 
