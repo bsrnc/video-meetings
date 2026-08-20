@@ -4,6 +4,7 @@ import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Alert, Card, Spinner } from '@heroui/react';
 import { AppHeader } from '@/components/app-header';
+import { RecordingUpload } from '@/components/recording-upload';
 import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
 import type { Meeting } from '@/lib/meetings';
@@ -125,6 +126,15 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
                   The meeting recording, stored for transcription and analysis.
                 </Card.Description>
               </Card.Header>
+
+              <Card.Content>
+                <RecordingUpload
+                  meeting={meeting}
+                  onUnauthorized={signOut}
+                  onUploaded={setMeeting}
+                  token={token}
+                />
+              </Card.Content>
             </Card>
           </>
         ) : null}

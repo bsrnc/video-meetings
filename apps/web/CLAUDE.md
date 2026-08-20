@@ -27,7 +27,7 @@ npm run typecheck      # tsc --noEmit
 
 ## Architecture
 
-- App Router under `app/`, no `src/` directory. Shared UI lives in `components/`, framework-free helpers in `lib/` — both at the project root, imported via `@/`.
+- App Router under `app/`, no `src/` directory. Shared UI lives in `components/`, React hooks in `hooks/`, framework-free helpers in `lib/` — all at the project root, imported via `@/`.
 - Path alias `@/*` → project root (`tsconfig.json`).
 - Tailwind CSS v4 + HeroUI v3 (`@heroui/react`) for UI. No `<HeroUIProvider>` needed (v3 dropped it). `app/globals.css` imports `tailwindcss` then `@heroui/styles`, in that order. `postcss.config.mjs` wires `@tailwindcss/postcss`.
 - HeroUI v3 uses compound components (`Card.Header`, not a `title` prop) and `onPress` instead of `onClick`. See `~/.claude/skills/heroui-react` for docs-fetch scripts before adding new components.
@@ -43,17 +43,22 @@ Every page below is a client component (they all read `localStorage` or attach e
 
 - `app/register/page.tsx` — registration form (email + password). Posts to `POST {NEXT_PUBLIC_API_URL}/auth/register`; on success stores `accessToken` in `localStorage` and redirects to `/`; surfaces 409 (duplicate email) and 400 (validation) API errors. Distinct "required" vs "malformed" validation messages; links to `/auth/login`.
 - `app/auth/login/page.tsx` — sign-in form (email + password). Posts to `POST {NEXT_PUBLIC_API_URL}/auth/login`, stores the token the same way, redirects to `/`, and surfaces the API's 401 (`Invalid email or password`) in the same alert. Password validation here is presence-only: the length rules belong to sign-up, and the API is the authority on whether an existing password matches. Links to `/register`.
-- `app/page.tsx` — the signed-in home page. Reads the token via `useIsHydrated()` (so the first render matches the server markup), redirects to `/auth/login` when it is missing, malformed, or expired, and greets the user with the email decoded out of the JWT. Loads `GET /meetings` with a bearer token for the total count and the 3 newest meetings, and opens a `Modal` that `POST`s a new meeting and folds the result into the list without a refetch. A 401 from either request signs the user out. Every request has an explicit loading, empty, and error rendering.
+- `app/page.tsx` — the signed-in home page. Gated by `useSession()`, and greets the user with the email decoded out of the JWT. Loads `GET /meetings` with a bearer token for the total count and the 3 newest meetings, and opens a `Modal` that `POST`s a new meeting and folds the result into the list without a refetch. A 401 from either request signs the user out. Every request has an explicit loading, empty, and error rendering. Each recent meeting links to its `/meetings/[id]` page.
+- `app/meetings/[id]/page.tsx` — the meeting page, gated by `useSession()` the same way. Loads `GET /meetings/:id` with a bearer token and renders the title, the creation time, and the recording card (`components/recording-upload.tsx`). A 404 is reported as "This meeting does not exist, or it was deleted." rather than the API's own copy; 401 signs the user out.
 
 ### Shared modules
 
 - `lib/api.ts` — `API_URL`, plus `parseErrorMessage` (Nest returns `message` as a string, or an array of strings from `ValidationPipe`) and the shared network-failure copy.
 - `lib/auth.ts` — `localStorage` token accessors and `decodeAccessToken`, which base64url-decodes the JWT payload **without verifying the signature**. That is enough to render the email and to skip a request that would 401; the API remains the only thing that decides whether a token is valid.
 - `lib/validation.ts` — email and password field validators shared by the two auth forms.
-- `lib/meetings.ts` — the `Meeting` shape as serialized over JSON, and `sortByNewest` (`GET /meetings` returns insertion order, not sorted).
+- `lib/meetings.ts` — the `Meeting` shape as serialized over JSON (including the `recordingKey` / `recordingStatus` / `recordingError` fields), and `sortByNewest` (`GET /meetings` returns insertion order, not sorted).
+- `lib/recording.ts` — the upload limit mirrored from the API (2 GiB), the picker's `accept` list, `validateRecordingFile` (the checks worth making before spending an upload), `recordingUploadErrorMessage` (HTTP status → English copy; the API answers in Russian, so its message is not surfaced), and `formatFileSize`.
+- `hooks/use-session.ts` — `useSession()`, the client-side auth gate shared by every signed-in page: the token from `localStorage` after hydration, the email decoded out of it, `signOut`, and the redirect to `/auth/login` when there is no usable token.
+- `components/app-header.tsx` — the header bar (brand home link + sign out) every signed-in page carries.
 - `components/password-field.tsx` — password input with the show/hide toggle, used by both auth forms.
 - `components/form-error-alert.tsx` — server-error alert that takes focus when it appears, so a failed submit is announced instead of leaving focus on the body.
 - `components/create-meeting-dialog.tsx` — the home page's "Create meeting" modal.
+- `components/recording-upload.tsx` — the meeting page's recording area: the saved-recording state with "Replace recording", and the picker that `POST`s the chosen file to `/meetings/:id/recording` as `multipart/form-data` (no explicit `Content-Type` — the browser has to set the multipart boundary). A rejected upload keeps the picker and its message in place so a retry is one click away. The native file input is `sr-only` behind a `<label>` styled as a button: the input's own button text comes from the browser locale, which would drop a Russian "Выберите файл" into this English UI, and `peer-focus-visible` puts the focus ring on the label since the input holding focus is invisible.
 
 ### Known gaps
 
