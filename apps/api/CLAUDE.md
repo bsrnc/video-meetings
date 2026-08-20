@@ -53,3 +53,7 @@ Feature-module Nest app on top of Prisma/PostgreSQL:
 **Database**: PostgreSQL via the root `docker-compose.yml` (`localhost:5434`, see root `CLAUDE.md`). `apps/api/.env` (gitignored; see `.env.example`) holds `DATABASE_URL` and `JWT_SECRET` — required, no defaults, `ConfigService.getOrThrow` fails fast if missing.
 
 Prettier (`.prettierrc`) and ESLint (`eslint.config.mjs`) configs are the Nest generator's defaults; the Prettier values match the repo-root `.prettierrc.json`.
+
+## File upload 
+
+Use this research for it:  @docs/research-meeting-upload.md
