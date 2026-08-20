@@ -414,4 +414,92 @@ test.describe('meeting recording status updates without a reload', () => {
     await expect(page.getByText('Uploading recording…')).toBeHidden();
     expect(getCalls).toBeGreaterThanOrEqual(2);
   });
+
+  test('a transient poll failure does not blank the page', async ({ page }) => {
+    await signIn(page);
+
+    let getCalls = 0;
+    await page.route(MEETING_URL, (route) => {
+      getCalls += 1;
+      if (getCalls === 1) {
+        return fulfillJson(route, 200, {
+          ...meetingWithoutRecording,
+          recordingStatus: 'UPLOADING' as const,
+        });
+      }
+      if (getCalls === 2) {
+        // A failing poll tick — must not replace the meeting on screen with
+        // a load-error page, unlike the very first load's own failure.
+        return fulfillJson(route, 500, {
+          statusCode: 500,
+          message: 'Внутренняя ошибка сервера',
+        });
+      }
+      return fulfillJson(route, 200, meetingWithRecording);
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+    await expect(
+      page.getByRole('heading', { name: 'Weekly sync' }),
+    ).toBeVisible();
+    await expect(page.getByText('Uploading recording…')).toBeVisible();
+
+    // Past the failing poll tick — the meeting must still be showing, and no
+    // load-error alert must have appeared.
+    await expect(
+      page.getByRole('heading', { name: 'Weekly sync' }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('main').getByRole('alert')).toBeHidden();
+
+    await expect(page.getByText('Recording saved')).toBeVisible({
+      timeout: 10_000,
+    });
+    expect(getCalls).toBeGreaterThanOrEqual(3);
+  });
+
+  test('keeps the retry button usable while the post-failure refetch is still pending', async ({
+    page,
+  }) => {
+    await signIn(page);
+
+    let getCalls = 0;
+    let resolveRefetch: () => void = () => undefined;
+    const refetchGate = new Promise<void>((resolve) => {
+      resolveRefetch = resolve;
+    });
+
+    await page.route(MEETING_URL, async (route) => {
+      getCalls += 1;
+      if (getCalls > 1) {
+        // Holds the post-failure refetch open so the test can inspect the
+        // gap between this tab's own failure and that refetch resolving.
+        await refetchGate;
+      }
+      await fulfillJson(route, 200, meetingWithoutRecording);
+    });
+    await page.route(RECORDING_URL, async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await fulfillPreflight(route);
+        return;
+      }
+      await fulfillJson(route, 500, {
+        statusCode: 500,
+        message: 'Не удалось сохранить запись',
+      });
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+    await page.locator('#recording-file').setInputFiles(wavFile());
+    await page.getByRole('button', { name: 'Upload recording' }).click();
+
+    await expect(page.getByRole('main').getByRole('alert')).toContainText(
+      'Could not save the recording. Please try again.',
+    );
+    // The refetch this failure triggered is still pending (held on
+    // refetchGate) — the button must already be usable, not stuck disabled
+    // until that unrelated refetch resolves.
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeEnabled();
+
+    resolveRefetch();
+  });
 });

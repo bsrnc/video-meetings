@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Card, Spinner } from '@heroui/react';
 import { AppHeader } from '@/components/app-header';
@@ -9,7 +9,21 @@ import { RecordingUpload } from '@/components/recording-upload';
 import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
 import { MEETING_GONE_MESSAGE, type Meeting } from '@/lib/meetings';
-import { RECORDING_STATUS_POLL_INTERVAL_MS } from '@/lib/recording';
+import {
+  RECORDING_STATUS_POLL_INTERVAL_MS,
+  RECORDING_STATUS_POLL_MAX_ATTEMPTS,
+} from '@/lib/recording';
+
+function sameMeeting(a: Meeting, b: Meeting): boolean {
+  return (
+    a.id === b.id &&
+    a.title === b.title &&
+    a.createdAt === b.createdAt &&
+    a.recordingKey === b.recordingKey &&
+    a.recordingStatus === b.recordingStatus &&
+    a.recordingError === b.recordingError
+  );
+}
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
@@ -37,13 +51,36 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
   const meeting = current?.meeting ?? null;
   const loadError = current?.error ?? null;
 
+  // Lets a callback fired from a child (not owned by any effect's own
+  // cleanup) tell whether its response is still for the meeting on screen —
+  // the App Router keeps this component mounted across an `id` change, so a
+  // slow response for the meeting the user has since navigated away from
+  // must not overwrite what is now showing.
+  const idRef = useRef(id);
+  useEffect(() => {
+    idRef.current = id;
+  }, [id]);
+
+  // So a poll tick that finds nothing new can skip setLoaded — otherwise
+  // every tick re-renders the page and RecordingUpload to reproduce
+  // pixel-identical output. Read via a ref (not a `fetchMeeting` dependency)
+  // so `fetchMeeting` itself stays referentially stable for the poll effect.
+  const loadedRef = useRef(loaded);
+  useEffect(() => {
+    loadedRef.current = loaded;
+  }, [loaded]);
+
   /**
    * Shared by the initial load, the `UPLOADING` poll, and a refetch after a
    * rejected upload — all three just need "what does the API say about this
-   * meeting right now".
+   * meeting right now". `silent` skips writing an error state on failure: the
+   * poll and the post-rejection refetch both run against a meeting that is
+   * already showing something useful (the last good state, or this tab's own
+   * failure message), and a transient failure there should not blank it —
+   * only the very first load has nothing on screen yet to protect.
    */
   const fetchMeeting = useCallback(
-    async (isStale: () => boolean) => {
+    async (isStale: () => boolean, opts: { silent?: boolean } = {}) => {
       try {
         const response = await fetch(`${API_URL}/meetings/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -57,6 +94,9 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
           return;
         }
         if (!response.ok) {
+          if (opts.silent) {
+            return;
+          }
           // The API answers 404 in English already, but its copy ("Meeting not
           // found") reads like a failure rather than an explanation.
           const error =
@@ -70,11 +110,20 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
         }
 
         const data = (await response.json()) as Meeting;
-        if (!isStale()) {
-          setLoaded({ id, meeting: data });
+        if (isStale()) {
+          return;
         }
+        const previous = loadedRef.current;
+        if (
+          previous?.id === id &&
+          previous.meeting &&
+          sameMeeting(previous.meeting, data)
+        ) {
+          return;
+        }
+        setLoaded({ id, meeting: data });
       } catch {
-        if (!isStale()) {
+        if (!opts.silent && !isStale()) {
           setLoaded({ id, error: NETWORK_ERROR_MESSAGE });
         }
       }
@@ -99,15 +148,22 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
 
   // While the recording is UPLOADING, poll for the outcome instead of
   // waiting for a manual reload — catches an upload started in another tab,
-  // or one still in flight from a previous visit to this page.
+  // or one still in flight from a previous visit to this page. Capped so a
+  // meeting stuck at UPLOADING server-side does not poll forever.
   useEffect(() => {
     if (!token || !email || meeting?.recordingStatus !== 'UPLOADING') {
       return;
     }
 
     let isStale = false;
+    let attempts = 0;
     const intervalId = setInterval(() => {
-      void fetchMeeting(() => isStale);
+      attempts += 1;
+      if (attempts > RECORDING_STATUS_POLL_MAX_ATTEMPTS) {
+        clearInterval(intervalId);
+        return;
+      }
+      void fetchMeeting(() => isStale, { silent: true });
     }, RECORDING_STATUS_POLL_INTERVAL_MS);
 
     return () => {
@@ -176,25 +232,21 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
                     // The rejection may or may not have changed the server's
                     // recordingStatus (a validation failure never touches it;
                     // a storage failure sets it to ERROR) — refetch rather
-                    // than guess which.
-                    void fetchMeeting(() => false);
+                    // than guess which. Silent and id-guarded: the user may
+                    // already be looking at a different meeting by the time
+                    // this resolves, and this tab's own failure message is
+                    // already on screen regardless of whether this succeeds.
+                    const meetingId = meeting.id;
+                    void fetchMeeting(() => idRef.current !== meetingId, {
+                      silent: true,
+                    });
                   }}
-                  onUploadStarted={() =>
-                    setLoaded((previous) =>
-                      previous?.id === meeting.id && previous.meeting
-                        ? {
-                            id: previous.id,
-                            meeting: {
-                              ...previous.meeting,
-                              recordingStatus: 'UPLOADING',
-                            },
-                          }
-                        : previous,
-                    )
-                  }
-                  onUploaded={(updated) =>
-                    setLoaded({ id: updated.id, meeting: updated })
-                  }
+                  onUploaded={(updated) => {
+                    if (idRef.current !== updated.id) {
+                      return;
+                    }
+                    setLoaded({ id: updated.id, meeting: updated });
+                  }}
                   token={token}
                 />
               </Card.Content>

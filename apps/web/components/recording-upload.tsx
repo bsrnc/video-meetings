@@ -20,12 +20,6 @@ const FILE_ERROR_ID = `${FILE_INPUT_ID}-error`;
 interface RecordingUploadProps {
   meeting: Meeting;
   token: string;
-  /**
-   * Called right as the upload request is sent, so the page can reflect
-   * `recordingStatus: 'UPLOADING'` immediately — the API sets that status at
-   * the same moment, before it starts moving the file to storage.
-   */
-  onUploadStarted: () => void;
   /** Receives the meeting as the API returned it after a successful upload. */
   onUploaded: (meeting: Meeting) => void;
   /**
@@ -47,7 +41,6 @@ interface RecordingUploadProps {
 export function RecordingUpload({
   meeting,
   token,
-  onUploadStarted,
   onUploaded,
   onUploadFailed,
   onUnauthorized,
@@ -64,13 +57,24 @@ export function RecordingUpload({
   const [isReplacing, setIsReplacing] = useState(false);
 
   const isSaved = meeting.recordingStatus === 'READY';
+  // This tab's own request in flight, or one the status poll picked up from
+  // elsewhere — either way, a recording is being written for this meeting
+  // right now. `isUploading` is checked in addition to (not instead of)
+  // `meeting.recordingStatus`, rather than waiting on the page's async
+  // refetch to reflect this tab's own request ending: that refetch exists to
+  // pick up a genuine server-side ERROR, and its timing has nothing to do
+  // with when this tab's own submit actually finished.
+  const isUploadInProgress =
+    isUploading || meeting.recordingStatus === 'UPLOADING';
   // A meeting whose last upload failed server-side still needs the picker, so
   // only a saved recording hides it — until "Replace recording" asks for it.
-  const isPickerVisible = !isSaved || isReplacing;
-  // `recordingStatus: 'UPLOADING'` can be this tab's own request, or one the
-  // status poll picked up from elsewhere — either way, a second upload for
-  // the same meeting would only race the first at the same storage key.
-  const isBusy = isUploading || meeting.recordingStatus === 'UPLOADING';
+  // Kept visible for this tab's own in-flight request even if a status poll
+  // concurrently reports READY from elsewhere, so this submit's own outcome
+  // (and its error alert, if it fails) still has somewhere to land.
+  const isPickerVisible = !isSaved || isReplacing || isUploading;
+  // A second upload for the same meeting would only race the first at the
+  // same storage key.
+  const isBusy = isUploadInProgress;
 
   const clearPicker = () => {
     setFile(null);
@@ -108,7 +112,6 @@ export function RecordingUpload({
     setFileError(null);
     setUploadError(null);
     setIsUploading(true);
-    onUploadStarted();
 
     try {
       const body = new FormData();
@@ -153,7 +156,7 @@ export function RecordingUpload({
           tab's own submit, so the transition needs to reach a screen reader
           without depending on focus already being here. */}
       <div aria-atomic="true" aria-live="polite">
-        {meeting.recordingStatus === 'UPLOADING' ? (
+        {isUploadInProgress ? (
           <Alert status="accent">
             <Alert.Indicator>
               <Spinner color="current" size="sm" />

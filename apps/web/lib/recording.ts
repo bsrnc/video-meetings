@@ -34,6 +34,13 @@ export const RECORDING_NO_FILE_MESSAGE = 'Choose a recording file to upload.';
 export const RECORDING_STATUS_POLL_INTERVAL_MS = 3000;
 
 /**
+ * Upper bound on poll ticks (10 minutes at the interval above) — a backstop
+ * against polling forever if a meeting's `recordingStatus` ever gets stuck at
+ * `UPLOADING` server-side (a crashed worker, a lost callback).
+ */
+export const RECORDING_STATUS_POLL_MAX_ATTEMPTS = 200;
+
+/**
  * Rejects what the API would certainly reject, before spending an upload on
  * it. Deliberately narrow: the browser reports an empty `type` for extensions
  * it does not know, and the API's magic-byte check — not the file's declared
