@@ -31,6 +31,23 @@ describe('createRecordingMulterOptions', () => {
     options.fileFilter?.({} as Request, fakeFile('video/mp4'), callback);
   });
 
+  it('accepts the generic application/octet-stream declared type via fileFilter', (done) => {
+    const options = createRecordingMulterOptions();
+    const callback: FileFilterCallback = (
+      error: Error | null,
+      acceptFile?: boolean,
+    ) => {
+      expect(error).toBeNull();
+      expect(acceptFile).toBe(true);
+      done();
+    };
+    options.fileFilter?.(
+      {} as Request,
+      fakeFile('application/octet-stream'),
+      callback,
+    );
+  });
+
   it('rejects a disallowed mime type via fileFilter with a clear message', (done) => {
     const options = createRecordingMulterOptions();
     const callback: FileFilterCallback = (error: Error | null) => {

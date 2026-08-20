@@ -108,6 +108,38 @@ describe('Meetings recording upload (e2e)', () => {
       expect((getResponse.body as Meeting).recordingStatus).toBe('READY');
     });
 
+    it('keeps the existing READY recording when a later upload attempt is rejected', async () => {
+      const token = await getAuthToken();
+      const meeting = await createMeeting(token);
+
+      const uploadResponse = await request(app.getHttpServer())
+        .post(`/meetings/${meeting.id}/recording`)
+        .set(...authHeader(token))
+        .attach('file', minimalWavBuffer(), {
+          filename: 'recording.wav',
+          contentType: 'audio/wav',
+        })
+        .expect(201);
+      const readyKey = (uploadResponse.body as Meeting).recordingKey;
+
+      await request(app.getHttpServer())
+        .post(`/meetings/${meeting.id}/recording`)
+        .set(...authHeader(token))
+        .attach('file', Buffer.from('not a recording'), {
+          filename: 'notes.txt',
+          contentType: 'text/plain',
+        })
+        .expect(415);
+
+      const getResponse = await request(app.getHttpServer())
+        .get(`/meetings/${meeting.id}`)
+        .set(...authHeader(token))
+        .expect(200);
+      const meetingAfter = getResponse.body as Meeting;
+      expect(meetingAfter.recordingStatus).toBe('READY');
+      expect(meetingAfter.recordingKey).toBe(readyKey);
+    });
+
     it('is accessible to any authenticated user, not just the meeting creator', async () => {
       const creatorToken = await getAuthToken();
       const meeting = await createMeeting(creatorToken);
@@ -123,7 +155,7 @@ describe('Meetings recording upload (e2e)', () => {
         .expect(201);
     });
 
-    it('rejects a file whose real type is not an allowed video/audio type', async () => {
+    it('rejects a file whose declared Content-Type is not video/audio', async () => {
       const token = await getAuthToken();
       const meeting = await createMeeting(token);
 
@@ -133,6 +165,33 @@ describe('Meetings recording upload (e2e)', () => {
         .attach('file', Buffer.from('just plain text, not a recording'), {
           filename: 'notes.txt',
           contentType: 'text/plain',
+        })
+        .expect(415);
+
+      const body = response.body as { message: string };
+      expect(typeof body.message).toBe('string');
+      expect(body.message.length).toBeGreaterThan(0);
+
+      const getResponse = await request(app.getHttpServer())
+        .get(`/meetings/${meeting.id}`)
+        .set(...authHeader(token))
+        .expect(200);
+      expect((getResponse.body as Meeting).recordingStatus).not.toBe('READY');
+    });
+
+    it('rejects a file with a spoofed Content-Type whose real bytes are not an allowed type', async () => {
+      const token = await getAuthToken();
+      const meeting = await createMeeting(token);
+
+      // Passes the coarse declared-Content-Type prefilter (video/mp4) but
+      // isn't actually an mp4 — only the magic-byte check in
+      // MeetingsService.uploadRecording can catch this.
+      const response = await request(app.getHttpServer())
+        .post(`/meetings/${meeting.id}/recording`)
+        .set(...authHeader(token))
+        .attach('file', Buffer.from('just plain text, not a recording'), {
+          filename: 'fake.mp4',
+          contentType: 'video/mp4',
         })
         .expect(415);
 

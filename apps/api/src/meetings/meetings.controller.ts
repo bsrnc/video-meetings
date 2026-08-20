@@ -14,6 +14,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Meeting } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
+import { MeetingExistsGuard } from './guards/meeting-exists.guard';
 import { MeetingsService } from './meetings.service';
 import { MulterExceptionFilter } from './multer-exception.filter';
 
@@ -38,6 +39,7 @@ export class MeetingsController {
   }
 
   @Post(':id/recording')
+  @UseGuards(MeetingExistsGuard)
   @UseFilters(MulterExceptionFilter)
   @UseInterceptors(FileInterceptor('file'))
   uploadRecording(

@@ -4,6 +4,7 @@ import {
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
@@ -13,24 +14,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { isAllowedRecordingMimeType } from './recording-upload.constants';
 
-function extractMessage(error: HttpException): string {
-  const response = error.getResponse();
-  if (typeof response === 'string') {
-    return response;
-  }
-  if (
-    response &&
-    typeof response === 'object' &&
-    'message' in response &&
-    typeof response.message === 'string'
-  ) {
-    return response.message;
-  }
-  return error.message;
-}
-
 @Injectable()
 export class MeetingsService {
+  private readonly logger = new Logger(MeetingsService.name);
+
+  // Serializes concurrent uploadRecording calls per meeting id: without
+  // this, two requests uploading to the same deterministic storage key
+  // could finish their S3 upload / DB update in a different order than
+  // they started, leaving recordingStatus/recordingKey describing neither
+  // attempt correctly. Different meeting ids never block each other.
+  private readonly uploadLocks = new Map<string, Promise<void>>();
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storageService: StorageService,
@@ -52,21 +46,23 @@ export class MeetingsService {
     return meeting;
   }
 
-  async uploadRecording(
+  uploadRecording(
+    meetingId: string,
+    file: Express.Multer.File,
+  ): Promise<Meeting> {
+    return this.runExclusive(meetingId, () =>
+      this.doUploadRecording(meetingId, file),
+    );
+  }
+
+  private async doUploadRecording(
     meetingId: string,
     file: Express.Multer.File,
   ): Promise<Meeting> {
     try {
-      await this.findOne(meetingId);
-
-      await this.prisma.meeting.update({
-        where: { id: meetingId },
-        data: {
-          recordingStatus: RecordingStatus.UPLOADING,
-          recordingError: null,
-        },
-      });
-
+      // Type validation runs before touching recordingStatus/recordingKey:
+      // a rejected upload must not disturb a previously stored, still-valid
+      // recording (MeetingExistsGuard already confirmed the meeting exists).
       const detected = await fileTypeFromFile(file.path);
       if (!detected || !isAllowedRecordingMimeType(detected.mime)) {
         throw new UnsupportedMediaTypeException(
@@ -75,6 +71,14 @@ export class MeetingsService {
             : 'Не удалось определить тип файла',
         );
       }
+
+      await this.prisma.meeting.update({
+        where: { id: meetingId },
+        data: {
+          recordingStatus: RecordingStatus.UPLOADING,
+          recordingError: null,
+        },
+      });
 
       const key = `meetings/${meetingId}/recording`;
       await this.storageService.upload(
@@ -92,13 +96,13 @@ export class MeetingsService {
         },
       });
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof UnsupportedMediaTypeException) {
         throw error;
       }
 
       const message =
         error instanceof HttpException
-          ? extractMessage(error)
+          ? error.message
           : 'Не удалось сохранить запись';
       await this.prisma.meeting
         .update({
@@ -108,7 +112,14 @@ export class MeetingsService {
             recordingError: message,
           },
         })
-        .catch(() => undefined);
+        .catch((updateError: unknown) => {
+          this.logger.error(
+            `Failed to mark meeting ${meetingId} recording as ERROR`,
+            updateError instanceof Error
+              ? updateError.stack
+              : String(updateError),
+          );
+        });
 
       throw error instanceof HttpException
         ? error
@@ -116,5 +127,21 @@ export class MeetingsService {
     } finally {
       await unlink(file.path).catch(() => undefined);
     }
+  }
+
+  private runExclusive<T>(key: string, task: () => Promise<T>): Promise<T> {
+    const previous = this.uploadLocks.get(key) ?? Promise.resolve();
+    const settled = previous.then(task, task);
+    const tail = settled.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.uploadLocks.set(key, tail);
+    void tail.finally(() => {
+      if (this.uploadLocks.get(key) === tail) {
+        this.uploadLocks.delete(key);
+      }
+    });
+    return settled;
   }
 }

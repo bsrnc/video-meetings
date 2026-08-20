@@ -1,13 +1,21 @@
-import { ArgumentsHost, HttpStatus } from '@nestjs/common';
-import { MulterError } from 'multer';
+import {
+  ArgumentsHost,
+  HttpStatus,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { MulterExceptionFilter } from './multer-exception.filter';
+
+interface JsonErrorBody {
+  statusCode: number;
+  message: string;
+}
 
 function fakeHost(): {
   host: ArgumentsHost;
-  json: jest.Mock;
+  json: jest.Mock<void, [JsonErrorBody]>;
   status: jest.Mock;
 } {
-  const json = jest.fn();
+  const json = jest.fn<void, [JsonErrorBody]>();
   const status = jest.fn().mockReturnValue({ json });
   const host = {
     switchToHttp: () => ({
@@ -18,27 +26,16 @@ function fakeHost(): {
 }
 
 describe('MulterExceptionFilter', () => {
-  it('maps LIMIT_FILE_SIZE to 413 with a clear message', () => {
+  it('maps PayloadTooLargeException (what FileInterceptor throws for LIMIT_FILE_SIZE) to 413 with a clear message', () => {
     const filter = new MulterExceptionFilter();
     const { host, json, status } = fakeHost();
 
-    filter.catch(new MulterError('LIMIT_FILE_SIZE'), host);
+    filter.catch(new PayloadTooLargeException('File too large'), host);
 
     expect(status).toHaveBeenCalledWith(HttpStatus.PAYLOAD_TOO_LARGE);
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: HttpStatus.PAYLOAD_TOO_LARGE }),
-    );
-  });
-
-  it('maps other multer errors to 400', () => {
-    const filter = new MulterExceptionFilter();
-    const { host, json, status } = fakeHost();
-
-    filter.catch(new MulterError('LIMIT_UNEXPECTED_FILE'), host);
-
-    expect(status).toHaveBeenCalledWith(HttpStatus.BAD_REQUEST);
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: HttpStatus.BAD_REQUEST }),
-    );
+    const body = json.mock.calls[0][0];
+    expect(body.statusCode).toBe(HttpStatus.PAYLOAD_TOO_LARGE);
+    expect(typeof body.message).toBe('string');
+    expect(body.message).not.toBe('File too large');
   });
 });
