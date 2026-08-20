@@ -13,8 +13,17 @@ model User {
   createdAt    DateTime @default(now())
 }
 
+enum RecordingStatus {
+  UPLOADING
+  READY
+  ERROR
+}
+
 model Meeting {
-  id        String   @id @default(uuid())
-  title     String
-  createdAt DateTime @default(now())
+  id              String           @id @default(uuid())
+  title           String
+  createdAt       DateTime         @default(now())
+  recordingKey    String?
+  recordingStatus RecordingStatus?
+  recordingError  String?
 }
