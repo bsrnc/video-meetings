@@ -13,6 +13,7 @@ dist/
 build/
 out/
 .next/
+.next-e2e/
 next-env.d.ts
 
 # TypeScript
@@ -41,6 +42,12 @@ coverage/
 *.png
 *.jpg
 *.jpeg
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
 
 # Playwright MCP artifacts
 .playwright-mcp/

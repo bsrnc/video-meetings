@@ -1,23 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import {
-  Alert,
-  Button,
-  Card,
-  Spinner,
-  useIsHydrated,
-  useOverlayState,
-} from '@heroui/react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { Button, Card, Spinner, useOverlayState } from '@heroui/react';
+import { AppHeader } from '@/components/app-header';
+import { PageErrorAlert } from '@/components/page-error-alert';
 import { CreateMeetingDialog } from '@/components/create-meeting-dialog';
+import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
-import {
-  clearStoredToken,
-  decodeAccessToken,
-  getStoredToken,
-  isAccessTokenExpired,
-} from '@/lib/auth';
 import { sortByNewest, type Meeting } from '@/lib/meetings';
 
 const RECENT_MEETINGS_COUNT = 3;
@@ -28,34 +18,10 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 });
 
 export default function HomePage() {
-  const router = useRouter();
   const createDialog = useOverlayState();
+  const { token, email, signOut } = useSession();
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  // The token lives in localStorage, so it can only be read on the client. The
-  // first render — server render and hydration alike — must not touch it, or
-  // the markup would not match.
-  const isHydrated = useIsHydrated();
-  const token = isHydrated ? getStoredToken() : null;
-
-  // An expired token counts as no token at all: the API would 401 on it anyway.
-  const email = useMemo(() => {
-    const payload = token ? decodeAccessToken(token) : null;
-    return payload && !isAccessTokenExpired(payload) ? payload.email : null;
-  }, [token]);
-
-  const signOut = useCallback(() => {
-    clearStoredToken();
-    router.replace('/auth/login');
-  }, [router]);
-
-  useEffect(() => {
-    if (isHydrated && !email) {
-      clearStoredToken();
-      router.replace('/auth/login');
-    }
-  }, [email, isHydrated, router]);
 
   useEffect(() => {
     if (!token || !email) {
@@ -70,7 +36,9 @@ export default function HomePage() {
         });
 
         if (response.status === 401) {
-          signOut();
+          if (!isStale) {
+            signOut();
+          }
           return;
         }
         if (!response.ok) {
@@ -110,14 +78,7 @@ export default function HomePage() {
 
   return (
     <>
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-separator px-4 py-3 sm:px-6">
-        <span className="text-base font-semibold text-foreground">
-          Video Meetings
-        </span>
-        <Button className="h-11" onPress={signOut} variant="tertiary">
-          Sign out
-        </Button>
-      </header>
+      <AppHeader onSignOut={signOut} />
 
       <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 sm:p-6">
         <div className="flex flex-col gap-1">
@@ -129,14 +90,7 @@ export default function HomePage() {
           </p>
         </div>
 
-        {loadError ? (
-          <Alert status="danger">
-            <Alert.Indicator />
-            <Alert.Content>
-              <Alert.Title>{loadError}</Alert.Title>
-            </Alert.Content>
-          </Alert>
-        ) : null}
+        <PageErrorAlert message={loadError} />
 
         <Card className="gap-4 p-6">
           <Card.Header className="gap-1">
@@ -177,19 +131,21 @@ export default function HomePage() {
             ) : (
               <ul className="flex flex-col divide-y divide-separator">
                 {recentMeetings.map((meeting) => (
-                  <li
-                    className="flex flex-col gap-0.5 py-3 first:pt-0 last:pb-0"
-                    key={meeting.id}
-                  >
-                    <span className="text-sm font-medium text-foreground">
-                      {meeting.title}
-                    </span>
-                    <time
-                      className="text-xs text-muted"
-                      dateTime={meeting.createdAt}
+                  <li key={meeting.id}>
+                    <Link
+                      className="flex flex-col gap-0.5 py-3 hover:underline"
+                      href={`/meetings/${meeting.id}`}
                     >
-                      {dateFormatter.format(new Date(meeting.createdAt))}
-                    </time>
+                      <span className="text-sm font-medium text-foreground">
+                        {meeting.title}
+                      </span>
+                      <time
+                        className="text-xs text-muted"
+                        dateTime={meeting.createdAt}
+                      >
+                        {dateFormatter.format(new Date(meeting.createdAt))}
+                      </time>
+                    </Link>
                   </li>
                 ))}
               </ul>
