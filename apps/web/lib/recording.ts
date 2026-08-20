@@ -1,3 +1,5 @@
+import { MEETING_GONE_MESSAGE } from '@/lib/meetings';
+
 /**
  * Mirrors `RECORDING_MAX_FILE_SIZE_BYTES` in
  * `apps/api/src/meetings/recording-upload.constants.ts` (2 GiB). Checking it
@@ -9,7 +11,7 @@ export const RECORDING_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024 * 1024;
 export const RECORDING_FILE_ACCEPT = 'video/*,audio/*';
 
 export const RECORDING_TOO_LARGE_MESSAGE =
-  'That file is larger than the 2 GB limit. Choose a smaller recording.';
+  'That file is larger than the 2 GiB limit. Choose a smaller recording.';
 
 /**
  * The formats behind `ALLOWED_RECORDING_MIME_TYPES` API-side, named by
@@ -21,8 +23,7 @@ export const RECORDING_UNSUPPORTED_TYPE_MESSAGE =
 export const RECORDING_SAVE_FAILED_MESSAGE =
   'Could not save the recording. Please try again.';
 
-export const RECORDING_MEETING_GONE_MESSAGE =
-  'This meeting does not exist, or it was deleted.';
+export const RECORDING_NO_FILE_MESSAGE = 'Choose a recording file to upload.';
 
 /**
  * Rejects what the API would certainly reject, before spending an upload on
@@ -45,12 +46,12 @@ export function validateRecordingFile(file: File): string | null {
 }
 
 /** Maps an upload rejection onto copy that says what to do about it. */
-export function recordingUploadErrorMessage(status: number): string | null {
+export function recordingUploadErrorMessage(status: number): string {
   switch (status) {
     case 400:
-      return 'Choose a recording file to upload.';
+      return RECORDING_NO_FILE_MESSAGE;
     case 404:
-      return RECORDING_MEETING_GONE_MESSAGE;
+      return MEETING_GONE_MESSAGE;
     case 413:
       return RECORDING_TOO_LARGE_MESSAGE;
     case 415:
@@ -58,7 +59,7 @@ export function recordingUploadErrorMessage(status: number): string | null {
     default:
       // The API answers other failures in Russian while this UI is English,
       // so its message is not surfaced; only these are.
-      return status >= 400 ? RECORDING_SAVE_FAILED_MESSAGE : null;
+      return RECORDING_SAVE_FAILED_MESSAGE;
   }
 }
 

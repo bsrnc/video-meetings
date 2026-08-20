@@ -8,6 +8,9 @@ const RECORDING_URL = `${MEETING_URL}/recording`;
 const UNSUPPORTED_TYPE_MESSAGE =
   'That file is not a supported recording. Choose an MP4, WebM, MOV, MP3, WAV, M4A or OGG file.';
 
+const TOO_LARGE_MESSAGE =
+  'That file is larger than the 2 GiB limit. Choose a smaller recording.';
+
 interface MeetingResponse {
   id: string;
   title: string;
@@ -134,7 +137,7 @@ test.describe('meeting recording upload', () => {
       }
       // The file has to actually reach the request as multipart form data.
       uploadedFileNames.push(
-        route.request().postData()?.includes('weekly-sync.wav')
+        route.request().postDataBuffer()?.includes('weekly-sync.wav')
           ? 'weekly-sync.wav'
           : 'unknown',
       );
@@ -225,6 +228,44 @@ test.describe('meeting recording upload', () => {
     await expect(page.getByRole('main').getByRole('alert')).toContainText(
       UNSUPPORTED_TYPE_MESSAGE,
     );
+
+    // Submitting anyway must not send it either — the pick-time check and the
+    // submit-time check are separate guards, and only this proves the second.
+    await page.getByRole('button', { name: 'Upload recording' }).click();
+    await expect(page.getByRole('main').getByRole('alert')).toContainText(
+      UNSUPPORTED_TYPE_MESSAGE,
+    );
     expect(uploadAttempts).toBe(0);
+  });
+
+  test('reports a file the API rejects as too large', async ({ page }) => {
+    await signIn(page);
+
+    await page.route(MEETING_URL, (route) =>
+      fulfillJson(route, 200, meetingWithoutRecording),
+    );
+    await page.route(RECORDING_URL, async (route) => {
+      if (route.request().method() === 'OPTIONS') {
+        await fulfillPreflight(route);
+        return;
+      }
+      // The API's own 413 body, message and all.
+      await fulfillJson(route, 413, {
+        statusCode: 413,
+        message: 'Файл записи превышает допустимый размер',
+      });
+    });
+
+    await page.goto(`/meetings/${MEETING_ID}`);
+
+    // The limit itself is not exercised here: it takes 2 GiB to cross, and
+    // what needs covering is that a 413 is reported in this app's own words.
+    await page.locator('#recording-file').setInputFiles(wavFile());
+    await page.getByRole('button', { name: 'Upload recording' }).click();
+
+    await expect(page.getByRole('main').getByRole('alert')).toContainText(
+      TOO_LARGE_MESSAGE,
+    );
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   });
 });

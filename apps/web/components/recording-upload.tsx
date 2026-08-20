@@ -10,12 +10,12 @@ import {
   recordingUploadErrorMessage,
   validateRecordingFile,
   RECORDING_FILE_ACCEPT,
-  RECORDING_SAVE_FAILED_MESSAGE,
+  RECORDING_NO_FILE_MESSAGE,
 } from '@/lib/recording';
 
 const FILE_INPUT_ID = 'recording-file';
-
-const NO_FILE_MESSAGE = 'Choose a recording file to upload.';
+const HINT_ID = `${FILE_INPUT_ID}-hint`;
+const FILE_ERROR_ID = `${FILE_INPUT_ID}-error`;
 
 interface RecordingUploadProps {
   meeting: Meeting;
@@ -41,8 +41,12 @@ export function RecordingUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [hasUploadFailed, setHasUploadFailed] = useState(false);
+  // Two kinds of failure, told apart by where they belong: a file this app
+  // rejected before sending it is a problem with the field, and stays next to
+  // the field; a rejection that came back from the API is a problem with the
+  // submit, and goes to the alert that takes focus.
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isReplacing, setIsReplacing] = useState(false);
 
   const isSaved = meeting.recordingStatus === 'READY';
@@ -52,8 +56,8 @@ export function RecordingUpload({
 
   const clearPicker = () => {
     setFile(null);
-    setError(null);
-    setHasUploadFailed(false);
+    setFileError(null);
+    setUploadError(null);
     // The input keeps its own value; clearing state alone would leave the
     // previous file name showing under a fresh picker.
     if (inputRef.current) {
@@ -64,26 +68,27 @@ export function RecordingUpload({
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] ?? null;
     setFile(selected);
-    setHasUploadFailed(false);
-    // Validate on pick, not only on submit: a 2 GB upload is a long way to go
+    setUploadError(null);
+    // Validate on pick, not only on submit: 2 GiB is a long way to travel
     // before being told the file was never eligible.
-    setError(selected ? validateRecordingFile(selected) : null);
+    setFileError(selected ? validateRecordingFile(selected) : null);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!file) {
-      setError(NO_FILE_MESSAGE);
+      setFileError(RECORDING_NO_FILE_MESSAGE);
       return;
     }
     const rejection = validateRecordingFile(file);
     if (rejection) {
-      setError(rejection);
+      setFileError(rejection);
       return;
     }
 
-    setError(null);
+    setFileError(null);
+    setUploadError(null);
     setIsUploading(true);
 
     try {
@@ -106,11 +111,7 @@ export function RecordingUpload({
         return;
       }
       if (!response.ok) {
-        setHasUploadFailed(true);
-        setError(
-          recordingUploadErrorMessage(response.status) ??
-            RECORDING_SAVE_FAILED_MESSAGE,
-        );
+        setUploadError(recordingUploadErrorMessage(response.status));
         return;
       }
 
@@ -118,8 +119,7 @@ export function RecordingUpload({
       setIsReplacing(false);
       clearPicker();
     } catch {
-      setHasUploadFailed(true);
-      setError(NETWORK_ERROR_MESSAGE);
+      setUploadError(NETWORK_ERROR_MESSAGE);
     } finally {
       setIsUploading(false);
     }
@@ -139,7 +139,7 @@ export function RecordingUpload({
         </Alert>
       ) : null}
 
-      {meeting.recordingStatus === 'ERROR' && !isSaved ? (
+      {meeting.recordingStatus === 'ERROR' ? (
         <Alert status="warning">
           <Alert.Indicator />
           <Alert.Content>
@@ -165,27 +165,31 @@ export function RecordingUpload({
 
       {isPickerVisible ? (
         <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
-          <FormErrorAlert message={error} />
+          <FormErrorAlert message={uploadError} />
 
           <div className="flex flex-col gap-2">
-            {/* The native file input is hidden rather than styled: its button
-                text comes from the browser locale, which lands a Russian
-                "Выберите файл" in the middle of this English UI. The label is
-                the visible control; `peer-focus-visible` puts the focus ring
-                on it, since the input that actually holds focus is invisible. */}
-            <input
-              accept={RECORDING_FILE_ACCEPT}
-              aria-describedby={`${FILE_INPUT_ID}-hint`}
-              aria-invalid={error !== null}
-              className="peer sr-only"
-              disabled={isUploading}
-              id={FILE_INPUT_ID}
-              name="file"
-              onChange={handleFileChange}
-              ref={inputRef}
-              type="file"
-            />
             <div className="flex flex-wrap items-center gap-3">
+              {/* The native file input is hidden rather than styled: its own
+                  button text comes from the browser locale, which lands a
+                  Russian "Выберите файл" in the middle of this English UI. The
+                  label is the visible control, and it has to stay a sibling of
+                  the input — `peer-*` compiles to a sibling combinator, so
+                  nesting it one level deeper silently drops the focus ring
+                  from the only thing the user can see. */}
+              <input
+                accept={RECORDING_FILE_ACCEPT}
+                aria-describedby={
+                  fileError ? `${FILE_ERROR_ID} ${HINT_ID}` : HINT_ID
+                }
+                aria-invalid={fileError !== null}
+                className="peer sr-only"
+                disabled={isUploading}
+                id={FILE_INPUT_ID}
+                name="file"
+                onChange={handleFileChange}
+                ref={inputRef}
+                type="file"
+              />
               <label
                 className="inline-flex h-12 cursor-pointer items-center rounded-full border border-field-border px-5 text-sm font-medium text-foreground peer-disabled:cursor-not-allowed peer-disabled:opacity-50 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2"
                 htmlFor={FILE_INPUT_ID}
@@ -198,8 +202,22 @@ export function RecordingUpload({
                   : 'No file chosen'}
               </span>
             </div>
-            <p className="text-xs text-muted" id={`${FILE_INPUT_ID}-hint`}>
-              MP4, WebM, MOV, MP3, WAV, M4A or OGG, up to 2 GB.
+
+            {fileError ? (
+              // Announced where it happened, and without pulling focus off the
+              // picker the way the submit-failure alert does — the user is
+              // still in the middle of choosing a file.
+              <p
+                className="text-sm text-danger-soft-foreground"
+                id={FILE_ERROR_ID}
+                role="alert"
+              >
+                {fileError}
+              </p>
+            ) : null}
+
+            <p className="text-xs text-muted" id={HINT_ID}>
+              MP4, WebM, MOV, MP3, WAV, M4A or OGG, up to 2 GiB.
             </p>
           </div>
 
@@ -215,7 +233,7 @@ export function RecordingUpload({
                   {isPending ? <Spinner color="current" size="sm" /> : null}
                   {isPending
                     ? 'Uploading…'
-                    : hasUploadFailed
+                    : uploadError
                       ? 'Try again'
                       : 'Upload recording'}
                 </>

@@ -56,20 +56,26 @@ Every page below is a client component (they all read `localStorage` or attach e
 - `lib/api.ts` — `API_URL`, plus `parseErrorMessage` (Nest returns `message` as a string, or an array of strings from `ValidationPipe`) and the shared network-failure copy.
 - `lib/auth.ts` — `localStorage` token accessors and `decodeAccessToken`, which base64url-decodes the JWT payload **without verifying the signature**. That is enough to render the email and to skip a request that would 401; the API remains the only thing that decides whether a token is valid.
 - `lib/validation.ts` — email and password field validators shared by the two auth forms.
-- `lib/meetings.ts` — the `Meeting` shape as serialized over JSON (including the `recordingKey` / `recordingStatus` / `recordingError` fields), and `sortByNewest` (`GET /meetings` returns insertion order, not sorted).
-- `lib/recording.ts` — the upload limit mirrored from the API (2 GiB), the picker's `accept` list, `validateRecordingFile` (the checks worth making before spending an upload), `recordingUploadErrorMessage` (HTTP status → English copy; the API answers in Russian, so its message is not surfaced), and `formatFileSize`.
+- `lib/meetings.ts` — the `Meeting` shape as serialized over JSON (including the `recordingKey` / `recordingStatus` / `recordingError` fields), `sortByNewest` (`GET /meetings` returns insertion order, not sorted), and `MEETING_GONE_MESSAGE`, shared so a page load and a rejected upload cannot describe a missing meeting differently.
+- `lib/recording.ts` — the upload limit mirrored from the API (2 GiB — the copy says "GiB", since a file the OS calls 2.1 GB is under it), the picker's `accept` list, `validateRecordingFile` (the checks worth making before spending an upload), `recordingUploadErrorMessage` (HTTP status → English copy; the API answers in Russian, so its message is not surfaced), and `formatFileSize`.
 - `hooks/use-session.ts` — `useSession()`, the client-side auth gate shared by every signed-in page: the token from `localStorage` after hydration, the email decoded out of it, `signOut`, and the redirect to `/auth/login` when there is no usable token.
 - `components/app-header.tsx` — the header bar (brand home link + sign out) every signed-in page carries.
 - `components/password-field.tsx` — password input with the show/hide toggle, used by both auth forms.
-- `components/form-error-alert.tsx` — server-error alert that takes focus when it appears, so a failed submit is announced instead of leaving focus on the body.
+- `components/form-error-alert.tsx` — server-error alert that takes focus when it appears, so a failed submit is announced instead of leaving focus on the body. Only for failures that follow a submit: taking focus mid-interaction (say, when a picked file is rejected) drags the user off the control they were using.
+- `components/page-error-alert.tsx` — the same alert for a page-level load failure. Announced (`role="alert"`) but does not take focus: the user did not cause it, and there is no submit for focus to be stranded on.
 - `components/create-meeting-dialog.tsx` — the home page's "Create meeting" modal.
-- `components/recording-upload.tsx` — the meeting page's recording area: the saved-recording state with "Replace recording", and the picker that `POST`s the chosen file to `/meetings/:id/recording` as `multipart/form-data` (no explicit `Content-Type` — the browser has to set the multipart boundary). A rejected upload keeps the picker and its message in place so a retry is one click away. The native file input is `sr-only` behind a `<label>` styled as a button: the input's own button text comes from the browser locale, which would drop a Russian "Выберите файл" into this English UI, and `peer-focus-visible` puts the focus ring on the label since the input holding focus is invisible.
+- `components/recording-upload.tsx` — the meeting page's recording area: the saved-recording state with "Replace recording", and the picker that `POST`s the chosen file to `/meetings/:id/recording` as `multipart/form-data` (no explicit `Content-Type` — the browser has to set the multipart boundary). A rejected upload keeps the picker and its file in place so a retry is one click away. The two failure kinds land in different places: a file this app rejected before sending stays inline next to the field (`role="alert"`, no focus grab), while a rejection that came back from the API goes to the focus-taking `FormErrorAlert`. The native file input is `sr-only` behind a `<label>` styled as a button — its own button text comes from the browser locale, which would drop a Russian "Выберите файл" into this English UI. **The label has to stay a direct sibling of the input**: `peer-*` compiles to a sibling combinator (`.peer:focus-visible ~ *`), so nesting the label one level deeper silently drops the focus ring and the disabled styling from the only element the user can see.
 
 ### End-to-end tests
 
 `e2e/` holds Playwright specs; `playwright.config.ts` starts `next dev` on port
 3100 for them and pins `NEXT_PUBLIC_API_URL` to `http://localhost:3101`, an
-origin nothing listens on. The specs intercept every request to it with
+origin nothing listens on. `reuseExistingServer` is off on purpose: reusing a
+server already on that port skips the launch — and with it that env — leaving
+the app pointed at a real API while every intercept pattern misses. It also
+sets `NEXT_DIST_DIR=.next-e2e` (wired up in `next.config.ts`), because a second
+`next dev` refuses to start while one is running in this directory — without a
+dist dir of its own, the suite could not run with `npm run dev:web` open. The specs intercept every request to it with
 `page.route`, so they need no API, database or object storage — and they mock
 the API's real responses, including its Russian error copy, rather than a
 convenient shape. Fulfilled responses carry CORS headers and answer the
@@ -80,9 +86,14 @@ token whose signature is nonsense: the app decodes the payload without
 verifying it, and the API — the only thing that would object — is mocked.
 
 `e2e/recording-upload.spec.ts` covers the Phase 2 scenario: a valid file
-reaches the request as multipart data and flips the card to the saved state;
-an API rejection is reported and the retry succeeds; a file the API could
-never accept is rejected without an upload being attempted at all.
+reaches the request as multipart data (asserted against `postDataBuffer()` —
+the body is binary, and decoding it as text mangles it) and flips the card to
+the saved state; a 415 is reported and the retry succeeds; a 413 is reported in
+this app's own words; a file the API could never accept is rejected without an
+upload being attempted, on pick _and_ on submit.
+
+The size limit itself is not exercised — crossing it takes 2 GiB — so the 413
+mapping is what the spec pins down.
 
 Note when adding specs: Next renders its own `role="alert"` route announcer,
 so a page alert has to be scoped (`getByRole('main').getByRole('alert')`).

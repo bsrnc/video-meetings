@@ -8,7 +8,7 @@ export function AppHeader({ onSignOut }: { onSignOut: () => void }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-separator px-4 py-3 sm:px-6">
       <Link
-        className="text-base font-semibold text-foreground no-underline hover:underline"
+        className="text-base font-semibold text-foreground hover:underline"
         href="/"
       >
         Video Meetings

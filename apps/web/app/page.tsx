@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Button, Card, Spinner, useOverlayState } from '@heroui/react';
+import { Button, Card, Spinner, useOverlayState } from '@heroui/react';
 import { AppHeader } from '@/components/app-header';
+import { PageErrorAlert } from '@/components/page-error-alert';
 import { CreateMeetingDialog } from '@/components/create-meeting-dialog';
 import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
@@ -35,7 +36,9 @@ export default function HomePage() {
         });
 
         if (response.status === 401) {
-          signOut();
+          if (!isStale) {
+            signOut();
+          }
           return;
         }
         if (!response.ok) {
@@ -87,14 +90,7 @@ export default function HomePage() {
           </p>
         </div>
 
-        {loadError ? (
-          <Alert status="danger">
-            <Alert.Indicator />
-            <Alert.Content>
-              <Alert.Title>{loadError}</Alert.Title>
-            </Alert.Content>
-          </Alert>
-        ) : null}
+        <PageErrorAlert message={loadError} />
 
         <Card className="gap-4 p-6">
           <Card.Header className="gap-1">
@@ -137,14 +133,14 @@ export default function HomePage() {
                 {recentMeetings.map((meeting) => (
                   <li key={meeting.id}>
                     <Link
-                      className="flex flex-col gap-0.5 py-3 no-underline hover:underline"
+                      className="flex flex-col gap-0.5 py-3 hover:underline"
                       href={`/meetings/${meeting.id}`}
                     >
                       <span className="text-sm font-medium text-foreground">
                         {meeting.title}
                       </span>
                       <time
-                        className="text-xs text-muted no-underline"
+                        className="text-xs text-muted"
                         dateTime={meeting.createdAt}
                       >
                         {dateFormatter.format(new Date(meeting.createdAt))}

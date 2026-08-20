@@ -2,25 +2,39 @@
 
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Alert, Card, Spinner } from '@heroui/react';
+import { Card, Spinner } from '@heroui/react';
 import { AppHeader } from '@/components/app-header';
+import { PageErrorAlert } from '@/components/page-error-alert';
 import { RecordingUpload } from '@/components/recording-upload';
 import { useSession } from '@/hooks/use-session';
 import { API_URL, NETWORK_ERROR_MESSAGE, parseErrorMessage } from '@/lib/api';
-import type { Meeting } from '@/lib/meetings';
+import { MEETING_GONE_MESSAGE, type Meeting } from '@/lib/meetings';
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   dateStyle: 'medium',
   timeStyle: 'short',
 });
 
-const NOT_FOUND_MESSAGE = 'This meeting does not exist, or it was deleted.';
+/**
+ * What was loaded, and which id it was loaded for. The App Router keeps this
+ * component mounted across a change of `id`, so without the id here the
+ * previous meeting would stay on screen while the next one loads — and a 404
+ * on the new id would render the old meeting *and* the "does not exist" alert.
+ */
+interface LoadedMeeting {
+  id: string;
+  meeting?: Meeting;
+  error?: string;
+}
 
 export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
   const { id } = use(params);
   const { token, email, signOut } = useSession();
-  const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<LoadedMeeting | null>(null);
+
+  const current = loaded?.id === id ? loaded : null;
+  const meeting = current?.meeting ?? null;
+  const loadError = current?.error ?? null;
 
   useEffect(() => {
     if (!token || !email) {
@@ -34,6 +48,9 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
           headers: { Authorization: `Bearer ${token}` },
         });
 
+        if (isStale) {
+          return;
+        }
         if (response.status === 401) {
           signOut();
           return;
@@ -41,23 +58,23 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
         if (!response.ok) {
           // The API answers 404 in English already, but its copy ("Meeting not
           // found") reads like a failure rather than an explanation.
-          const message =
+          const error =
             response.status === 404
-              ? NOT_FOUND_MESSAGE
+              ? MEETING_GONE_MESSAGE
               : await parseErrorMessage(response);
           if (!isStale) {
-            setLoadError(message);
+            setLoaded({ id, error });
           }
           return;
         }
 
         const data = (await response.json()) as Meeting;
         if (!isStale) {
-          setMeeting(data);
+          setLoaded({ id, meeting: data });
         }
       } catch {
         if (!isStale) {
-          setLoadError(NETWORK_ERROR_MESSAGE);
+          setLoaded({ id, error: NETWORK_ERROR_MESSAGE });
         }
       }
     })();
@@ -86,18 +103,9 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
           ← All meetings
         </Link>
 
-        {loadError ? (
-          <div role="alert">
-            <Alert status="danger">
-              <Alert.Indicator />
-              <Alert.Content>
-                <Alert.Title>{loadError}</Alert.Title>
-              </Alert.Content>
-            </Alert>
-          </div>
-        ) : null}
+        <PageErrorAlert message={loadError} />
 
-        {meeting === null && loadError === null ? (
+        {current === null ? (
           <div className="flex justify-center py-10">
             <Spinner aria-label="Loading meeting" size="lg" />
           </div>
@@ -129,9 +137,12 @@ export default function MeetingPage({ params }: PageProps<'/meetings/[id]'>) {
 
               <Card.Content>
                 <RecordingUpload
+                  key={meeting.id}
                   meeting={meeting}
                   onUnauthorized={signOut}
-                  onUploaded={setMeeting}
+                  onUploaded={(updated) =>
+                    setLoaded({ id: updated.id, meeting: updated })
+                  }
                   token={token}
                 />
               </Card.Content>

@@ -1,3 +1,12 @@
+/**
+ * Copy for a meeting that is not there — the API answers 404 with "Meeting not
+ * found", which reads as a failure rather than an explanation. Shared so the
+ * page load and a rejected upload cannot describe the same condition
+ * differently.
+ */
+export const MEETING_GONE_MESSAGE =
+  'This meeting does not exist, or it was deleted.';
+
 /** `RecordingStatus` from `apps/api/prisma/schema.prisma`. */
 export type RecordingStatus = 'UPLOADING' | 'READY' | 'ERROR';
 
